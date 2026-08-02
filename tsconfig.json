@@ -26,9 +26,5 @@
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["tests", "dist"],
-  "references": [
-    { "path": "../transport" },
-    { "path": "../crypto" }
-  ]
+  "exclude": ["tests", "dist"]
 }
