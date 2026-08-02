@@ -102,6 +102,8 @@ function cipherSuiteToWire(suite: CipherSuite): number {
             return 0x1303;
         case "TLS_AES_128_CCM_SHA256":
             return 0x1304;
+        default:
+            return assertNever(suite);
     }
 }
 
@@ -146,7 +148,13 @@ export function buildClientHello(
     //   extensions_len(2) + extensions.
     const cipherSuitesBytes = new Uint8Array(config.cipherSuites.length * 2);
     for (let i = 0; i < config.cipherSuites.length; i++) {
-        const wire = cipherSuiteToWire(config.cipherSuites[i]!);
+        const suite = config.cipherSuites[i];
+        if (suite === undefined) {
+            throw new TlsHandshakeError("client_hello", {
+                cause: new Error(`cipher suite at index ${i} is missing`),
+            });
+        }
+        const wire = cipherSuiteToWire(suite);
         cipherSuitesBytes[i * 2] = (wire >> 8) & 0xff;
         cipherSuitesBytes[i * 2 + 1] = wire & 0xff;
     }
@@ -261,7 +269,13 @@ function encodeSupportedVersionsClient(versions: readonly ProtocolVersion[]): Ui
     const out = new Uint8Array(1 + versions.length * 2);
     out[0] = (versions.length * 2) & 0xff;
     for (let i = 0; i < versions.length; i++) {
-        const wire = versions[i]!.wire;
+        const version = versions[i];
+        if (version === undefined) {
+            throw new TlsHandshakeError("client_hello", {
+                cause: new Error(`supported version at index ${i} is missing`),
+            });
+        }
+        const wire = version.wire;
         out[1 + i * 2] = (wire >> 8) & 0xff;
         out[1 + i * 2 + 1] = wire & 0xff;
     }
@@ -297,7 +311,13 @@ function encodeSignatureAlgorithms(algorithms: readonly SignatureScheme[]): Uint
     out[0] = ((algorithms.length * 2) >> 8) & 0xff;
     out[1] = (algorithms.length * 2) & 0xff;
     for (let i = 0; i < algorithms.length; i++) {
-        const wire = signatureSchemeToWire(algorithms[i]!);
+        const scheme = algorithms[i];
+        if (scheme === undefined) {
+            throw new TlsHandshakeError("client_hello", {
+                cause: new Error(`signature algorithm at index ${i} is missing`),
+            });
+        }
+        const wire = signatureSchemeToWire(scheme);
         out[2 + i * 2] = (wire >> 8) & 0xff;
         out[2 + i * 2 + 1] = wire & 0xff;
     }
@@ -375,21 +395,25 @@ export function parseServerHello(buf: Uint8Array, offered: ServerHelloValidation
             });
         }
     };
+    const readByte = (): number => {
+        expect(1);
+        return buf[o++] as number;
+    };
 
     expect(2 + 32 + 1);
-    const protocolVersion = (buf[o++]! << 8) | buf[o++]!;
+    const protocolVersion = (readByte() << 8) | readByte();
     const random = buf.subarray(o, o + 32);
     o += 32;
 
-    const sessionIdLen = buf[o++]!;
+    const sessionIdLen = readByte();
     expect(sessionIdLen);
     const sessionId = buf.subarray(o, o + sessionIdLen);
     o += sessionIdLen;
 
     expect(2 + 1 + 2);
-    const cipherSuiteWire = (buf[o++]! << 8) | buf[o++]!;
+    const cipherSuiteWire = (readByte() << 8) | readByte();
     const cipherSuite = wireToCipherSuite(cipherSuiteWire);
-    const compressionMethod = buf[o++]!;
+    const compressionMethod = readByte();
     if (compressionMethod !== 0x00) {
         throw new TlsHandshakeError("server_hello", {
             cause: new Error(`unsupported compression method: ${compressionMethod}`),
@@ -404,7 +428,7 @@ export function parseServerHello(buf: Uint8Array, offered: ServerHelloValidation
     // supported_versions extension and later by the key-share extraction in
     // _computeSharedSecret) requires its input to be the length-prefixed block.
     const extensionsStart = o;
-    const extensionsLen = (buf[o++]! << 8) | buf[o++]!;
+    const extensionsLen = (readByte() << 8) | readByte();
     expect(extensionsLen);
     const extensions = buf.subarray(extensionsStart, o + extensionsLen);
 
@@ -432,7 +456,14 @@ function negotiateVersion(extensionsRaw: Uint8Array, offered: readonly ProtocolV
             cause: new Error(`supported_versions extension has unexpected length ${sv.data.length}`),
         });
     }
-    const wire = (sv.data[0]! << 8) | sv.data[1]!;
+    const hi = sv.data[0];
+    const lo = sv.data[1];
+    if (hi === undefined || lo === undefined) {
+        throw new TlsHandshakeError("server_hello", {
+            cause: new Error(`supported_versions extension data truncated`),
+        });
+    }
+    const wire = (hi << 8) | lo;
     const selected = selectVersion(wire, offered);
     assertVersionSupported(selected);
     return selected;
@@ -523,6 +554,8 @@ export function isKeyShareGroup(group: NamedGroup): boolean {
         case "x25519":
         case "x448":
             return true;
+        default:
+            return assertNever(group);
     }
 }
 

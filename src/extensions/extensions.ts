@@ -7,6 +7,7 @@
 
 import type { NamedGroup, ProtocolVersion, SignatureScheme } from "../types.js";
 import { TlsHandshakeError } from "../errors.js";
+import { assertNever } from "../utils.js";
 
 /** TLS extension types, per IANA / RFC 8446. */
 export const ExtensionType = {
@@ -118,7 +119,15 @@ export function parseExtensions(buf: Uint8Array): readonly TlsExtension[] {
         });
     }
     let o = 0;
-    const extensionsLen = (buf[o++]! << 8) | buf[o++]!;
+    const readByte = (): number => {
+        if (o >= buf.length) {
+            throw new TlsHandshakeError("server_hello", {
+                cause: new Error(`extension byte truncated at offset ${o}`),
+            });
+        }
+        return buf[o++] as number;
+    };
+    const extensionsLen = (readByte() << 8) | readByte();
     if (o + extensionsLen > buf.length) {
         throw new TlsHandshakeError("server_hello", {
             cause: new Error(`extensions length ${extensionsLen} exceeds buffer ${buf.length - o}`),
@@ -132,8 +141,8 @@ export function parseExtensions(buf: Uint8Array): readonly TlsExtension[] {
                 cause: new Error(`extension header truncated at offset ${o}`),
             });
         }
-        const type = (buf[o++]! << 8) | buf[o++]!;
-        const dataLen = (buf[o++]! << 8) | buf[o++]!;
+        const type = (readByte() << 8) | readByte();
+        const dataLen = (readByte() << 8) | readByte();
         if (o + dataLen > end) {
             throw new TlsHandshakeError("server_hello", {
                 cause: new Error(`extension data truncated: type=${type} len=${dataLen} at ${o}`),
@@ -167,6 +176,8 @@ export function signatureSchemeToWire(scheme: SignatureScheme): number {
             return 0x0805;
         case "rsa_pkcs1_sha256":
             return 0x0401;
+        default:
+            return assertNever(scheme);
     }
 }
 
@@ -181,6 +192,8 @@ export function namedGroupToWire(group: NamedGroup): number {
             return 0x001d;
         case "x448":
             return 0x001e;
+        default:
+            return assertNever(group);
     }
 }
 

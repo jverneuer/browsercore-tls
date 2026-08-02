@@ -11,8 +11,7 @@
  * the two steps independently (the extract output feeds the next stage's salt).
  */
 
-import { crypto, SHA_256, SHA_384 } from "@browsercore/crypto";
-import type { HashId } from "@browsercore/crypto";
+import { crypto, SHA_256, SHA_384, type HashId } from "@browsercore/crypto";
 import type {
     ApplicationTrafficSecrets,
     CipherSuite,
@@ -31,6 +30,8 @@ export function cipherSuiteToHash(cipherSuite: CipherSuite): HashId {
         case "TLS_CHACHA20_POLY1305_SHA256":
         case "TLS_AES_128_CCM_SHA256":
             return SHA_256;
+        default:
+            return assertNever(cipherSuite);
     }
 }
 
@@ -43,6 +44,8 @@ export function cipherSuiteKeyLength(cipherSuite: CipherSuite): number {
         case "TLS_AES_256_GCM_SHA384":
         case "TLS_CHACHA20_POLY1305_SHA256":
             return 32;
+        default:
+            return assertNever(cipherSuite);
     }
 }
 
@@ -82,7 +85,7 @@ function hkdfExpand(hash: HashId, prk: Uint8Array, info: Uint8Array, length: num
         throw new Error(`HKDF-Expand length ${length} exceeds maximum for hash (255 * ${hashLen})`);
     }
     const okm = new Uint8Array(n * hashLen);
-    let t: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
+    let t: Uint8Array = new Uint8Array(0);
     for (let i = 1; i <= n; i++) {
         const block = new Uint8Array(t.length + info.length + 1);
         block.set(t, 0);

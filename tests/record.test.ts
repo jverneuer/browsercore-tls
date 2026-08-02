@@ -1,0 +1,171 @@
+/**
+ * Tests for @browsercore/tls record layer (RFC 8446 §5).
+ *
+ * encryptRecord / decryptRecord are pure AEAD steps that delegate to
+ * @browsercore/crypto. We exercise every supported AEAD algorithm plus the
+ * exhaustiveness guard (default -> assertNever) by feeding an algorithm the
+ * type system would reject but that is a valid runtime string.
+ */
+
+import { describe, it, expect, vi } from "vitest";
+import { crypto } from "@browsercore/crypto";
+import {
+    encryptRecord,
+    decryptRecord,
+    cipherSuiteToAead,
+    serializeRecordHeader,
+} from "../src/record/record.js";
+import { TlsDecryptError } from "../src/errors.js";
+import type { AeadAlgorithm, CipherSuite } from "../src/types.js";
+
+// Mutable stand-in for the AEAD decrypt primitive. Tests can swap it to simulate
+// a misbehaving crypto backend; the hoisted vi.mock at the top of the file wires
+// it into the @browsercore/crypto module before record.js binds to it. By default
+// it delegates to the real aes128GcmDecrypt so the round-trip tests are unaffected;
+// the defensive-cause test overrides it to throw a non-Error.
+const mockDecrypt = vi.hoisted(() => vi.fn());
+vi.mock("@browsercore/crypto", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("@browsercore/crypto")>();
+    const realAes128GcmDecrypt = actual.crypto.aes128GcmDecrypt.bind(actual.crypto);
+    // `crypto` is a NodeCryptoProvider instance: shallow-spreading it would sever
+    // the prototype chain and drop its methods. Clone it via Object.create so the
+    // prototype (and thus every other method) is preserved, then override the one
+    // primitive we want to control.
+    const cryptoClone = Object.create(
+        Object.getPrototypeOf(actual.crypto),
+        Object.getOwnPropertyDescriptors(actual.crypto),
+    ) as typeof actual.crypto;
+    Object.defineProperty(cryptoClone, "aes128GcmDecrypt", {
+        configurable: true,
+        writable: true,
+        value: (...args: unknown[]) => mockDecrypt(...args),
+    });
+    mockDecrypt.mockImplementation(realAes128GcmDecrypt);
+    return {
+        ...actual,
+        crypto: cryptoClone,
+    };
+});
+
+/** Key + nonce sizes per AEAD algorithm (bytes). */
+function keyNonceFor(algorithm: AeadAlgorithm): { key: Uint8Array; nonce: Uint8Array } {
+    switch (algorithm) {
+        case "AES-128-GCM":
+            return { key: crypto.randomBytes(16), nonce: crypto.randomBytes(12) };
+        case "AES-256-GCM":
+            return { key: crypto.randomBytes(32), nonce: crypto.randomBytes(12) };
+        case "CHACHA20-POLY1305":
+            return { key: crypto.randomBytes(32), nonce: crypto.randomBytes(12) };
+    }
+}
+
+describe("cipherSuiteToAead", () => {
+    it("maps every cipher suite to its AEAD algorithm", () => {
+        const cases: ReadonlyArray<[CipherSuite, AeadAlgorithm]> = [
+            ["TLS_AES_128_GCM_SHA256", "AES-128-GCM"],
+            ["TLS_AES_128_CCM_SHA256", "AES-128-GCM"],
+            ["TLS_AES_256_GCM_SHA384", "AES-256-GCM"],
+            ["TLS_CHACHA20_POLY1305_SHA256", "CHACHA20-POLY1305"],
+        ];
+        for (const [suite, expected] of cases) {
+            expect(cipherSuiteToAead(suite)).toBe(expected);
+        }
+    });
+});
+
+describe("encryptRecord / decryptRecord round-trip", () => {
+    it("round-trips AES-128-GCM", () => {
+        const { key, nonce } = keyNonceFor("AES-128-GCM");
+        const plaintext = new TextEncoder().encode("hello aes-128-gcm");
+        const aad = serializeRecordHeader(23, plaintext.length + 16);
+        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-128-GCM");
+        expect(ciphertext.length).toBe(plaintext.length + 16); // + tag
+        const recovered = decryptRecord(ciphertext, key, nonce, aad, "AES-128-GCM");
+        expect(recovered).toEqual(plaintext);
+    });
+
+    it("round-trips AES-256-GCM", () => {
+        const { key, nonce } = keyNonceFor("AES-256-GCM");
+        const plaintext = new TextEncoder().encode("hello aes-256-gcm");
+        const aad = serializeRecordHeader(23, plaintext.length + 16);
+        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-256-GCM");
+        const recovered = decryptRecord(ciphertext, key, nonce, aad, "AES-256-GCM");
+        expect(recovered).toEqual(plaintext);
+    });
+
+    it("round-trips ChaCha20-Poly1305", () => {
+        const { key, nonce } = keyNonceFor("CHACHA20-POLY1305");
+        const plaintext = new TextEncoder().encode("hello chacha20-poly1305");
+        const aad = serializeRecordHeader(23, plaintext.length + 16);
+        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "CHACHA20-POLY1305");
+        const recovered = decryptRecord(ciphertext, key, nonce, aad, "CHACHA20-POLY1305");
+        expect(recovered).toEqual(plaintext);
+    });
+
+    it("decryption fails with TlsDecryptError when the authentication tag is wrong", () => {
+        const { key, nonce } = keyNonceFor("AES-128-GCM");
+        const plaintext = new TextEncoder().encode("integrity matters");
+        const aad = serializeRecordHeader(23, plaintext.length + 16);
+        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-128-GCM");
+        // Corrupt the last byte (part of the authentication tag).
+        ciphertext[ciphertext.length - 1] ^= 0xff;
+        expect(() => decryptRecord(ciphertext, key, nonce, aad, "AES-128-GCM")).toThrow(TlsDecryptError);
+    });
+
+    it("decryption fails with TlsDecryptError when the AAD does not match", () => {
+        const { key, nonce } = keyNonceFor("AES-128-GCM");
+        const plaintext = new TextEncoder().encode("aad binds the header");
+        const aad = serializeRecordHeader(23, plaintext.length + 16);
+        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-128-GCM");
+        // A different header -> different AAD -> auth failure.
+        const otherAad = serializeRecordHeader(22, plaintext.length + 16);
+        expect(() => decryptRecord(ciphertext, key, nonce, otherAad, "AES-128-GCM")).toThrow(TlsDecryptError);
+    });
+});
+
+describe("decryptRecord defensive cause handling", () => {
+    it("wraps a non-Error throw from the AEAD primitive as TlsDecryptError (no cause)", async () => {
+        // The catch branch at line 177 handles the case where the AEAD primitive
+        // throws something that is NOT an Error instance. The real @browsercore/crypto
+        // always throws DecryptError, so we simulate a misbehaving backend by
+        // pointing the hoisted mockDecrypt at a function that throws a bare string.
+        // (mockReset in the finally restores the default delegation to the real
+        // primitive, so later test files are unaffected.)
+        mockDecrypt.mockImplementation(() => {
+            throw "corrupt"; // non-Error throw
+        });
+
+        const key = crypto.randomBytes(16);
+        const nonce = crypto.randomBytes(12);
+        const aad = serializeRecordHeader(22, 16);
+        try {
+            expect(() => decryptRecord(new Uint8Array(16), key, nonce, aad, "AES-128-GCM")).toThrow(
+                TlsDecryptError,
+            );
+        } finally {
+            mockDecrypt.mockReset();
+        }
+    });
+});
+
+describe("exhaustiveness guards (default -> assertNever)", () => {
+    it("encryptRecord hits the default branch for an unrecognized algorithm", () => {
+        const { key, nonce } = keyNonceFor("AES-128-GCM");
+        const plaintext = new TextEncoder().encode("x");
+        const aad = serializeRecordHeader(23, plaintext.length + 16);
+        // "AES-128-CCM" is not a valid AeadAlgorithm, but at runtime the switch
+        // only sees a string — this exercises the exhaustiveness default.
+        const bad = "AES-128-CCM" as unknown as AeadAlgorithm;
+        expect(() => encryptRecord(plaintext, key, nonce, aad, bad)).toThrow(/Unexpected value/);
+    });
+
+    it("decryptRecord hits the default branch for an unrecognized algorithm", () => {
+        const { key, nonce } = keyNonceFor("AES-128-GCM");
+        const plaintext = new TextEncoder().encode("x");
+        const aad = serializeRecordHeader(23, plaintext.length + 16);
+        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-128-GCM");
+        const bad = "AES-128-CCM" as unknown as AeadAlgorithm;
+        // The default throws inside the try; the catch wraps it as TlsDecryptError.
+        expect(() => decryptRecord(ciphertext, key, nonce, aad, bad)).toThrow(TlsDecryptError);
+    });
+});

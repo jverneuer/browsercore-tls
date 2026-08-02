@@ -11,28 +11,32 @@
  * error rather than failing silently mid-flight.
  */
 
-import { crypto, SHA_384 } from "@browsercore/crypto";
-import type { HashId } from "@browsercore/crypto";
+import { crypto, SHA_384, type HashId } from "@browsercore/crypto";
 import type { Transport } from "@browsercore/transport";
-import type {
-    ApplicationData,
-    ApplicationTrafficSecrets,
-    CipherSuite,
-    ClientHelloConfig,
-    CloseReason,
-    KeyPair,
-    NamedGroup,
-    ProtocolVersion,
-    TlsConnection,
-    TlsOptions,
-    TlsSessionId,
-    TlsState,
-    TrafficSecrets,
+import {
+    TLS_1_3,
+    type ApplicationData,
+    type ApplicationTrafficSecrets,
+    type CipherSuite,
+    type ClientHelloConfig,
+    type CloseReason,
+    type KeyPair,
+    type NamedGroup,
+    type ProtocolVersion,
+    type TlsConnection,
+    type TlsOptions,
+    type TlsSessionId,
+    type TlsState,
+    type TrafficSecrets,
 } from "./types.js";
-import { TLS_1_3 } from "./types.js";
-import type { TlsError } from "./errors.js";
-import { TlsAlertError, TlsHandshakeError, ensureTlsError } from "./errors.js";
-import { createId } from "./utils.js";
+import {
+    TlsAlertError,
+    TlsDecryptError,
+    TlsHandshakeError,
+    ensureTlsError,
+    type TlsError,
+} from "./errors.js";
+import { assertNever, createId } from "./utils.js";
 import {
     cipherSuiteToAead,
     ContentType,
@@ -47,8 +51,9 @@ import {
     parseServerHello,
     recordServerHello,
     HandshakeType,
+    type HandshakePhase,
+    type ServerHello,
 } from "./handshake/handshake.js";
-import type { HandshakePhase, ServerHello } from "./handshake/handshake.js";
 import {
     cipherSuiteToHash,
     deriveApplicationSecrets,
@@ -62,8 +67,14 @@ import {
     parseExtensions,
     wireToNamedGroup,
 } from "./extensions/extensions.js";
-import { parseCertificate, validateHostname, verifyChain } from "./certificates/certificates.js";
-import type { Certificate, CertificateChain, TrustAnchor } from "./certificates/certificates.js";
+import {
+    parseCertificate,
+    validateHostname,
+    verifyChain,
+    type Certificate,
+    type CertificateChain,
+    type TrustAnchor,
+} from "./certificates/certificates.js";
 
 /** Default handshake timeout in milliseconds. */
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
@@ -111,9 +122,15 @@ function xorNonce(iv: Uint8Array, seq: number): Uint8Array {
     const nonce = Uint8Array.from(iv);
     let s = seq;
     for (let i = nonce.length - 1; i >= nonce.length - 8 && s > 0; i--) {
-        // bitwise XOR assign: flip the low byte of s into nonce[i]. The loop
-        // bounds guarantee i is a valid index, so the non-null assertion is safe.
-        nonce[i]! ^= s & 0xff;
+        // The loop bounds guarantee i is a valid index, but noUncheckedIndexedAccess
+        // cannot see that — read through a local and guard before mutating.
+        const byte = nonce[i];
+        if (byte === undefined) {
+            throw new TlsDecryptError("xor_nonce", {
+                cause: new Error(`nonce index ${i} out of bounds (iv length ${nonce.length})`),
+            });
+        }
+        nonce[i] = byte ^ (s & 0xff);
         s = Math.floor(s / 256);
     }
     return nonce;
@@ -126,7 +143,14 @@ function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
     }
     let diff = 0;
     for (let i = 0; i < a.length; i++) {
-        diff |= a[i]! ^ b[i]!;
+        // Lengths are equal here (checked above), so both indices are in bounds —
+        // but noUncheckedIndexedAccess cannot prove it, so read through locals.
+        const ai = a[i];
+        const bi = b[i];
+        if (ai === undefined || bi === undefined) {
+            return false;
+        }
+        diff |= ai ^ bi;
     }
     return diff === 0;
 }
@@ -158,21 +182,25 @@ export async function connectTls(options: TlsOptions): Promise<TlsConnection> {
 }
 
 /** Generate key shares for the requested groups (delegates to @browsercore/crypto). */
-export async function generateKeyShares(groups: readonly string[]): Promise<KeyPair[]> {
-    const shares: KeyPair[] = [];
-    for (const group of groups) {
-        if (group !== "x25519") {
-            // @browsercore/crypto only exposes X25519 key generation today. Other
-            // (EC)DHE groups would need a backend we do not have — fail fast and
-            // typed rather than producing a bogus key.
-            throw new TlsHandshakeError("client_hello", {
-                cause: new Error(`key share group "${group}" is not supported by the crypto backend`),
-            });
+export function generateKeyShares(groups: readonly string[]): Promise<KeyPair[]> {
+    // Wrapped in .then() so a synchronous throw (unsupported group) becomes a
+    // rejected promise — callers await this and tests assert with .rejects.
+    return Promise.resolve().then(() => {
+        const shares: KeyPair[] = [];
+        for (const group of groups) {
+            if (group !== "x25519") {
+                // @browsercore/crypto only exposes X25519 key generation today. Other
+                // (EC)DHE groups would need a backend we do not have — fail fast and
+                // typed rather than producing a bogus key.
+                throw new TlsHandshakeError("client_hello", {
+                    cause: new Error(`key share group "${group}" is not supported by the crypto backend`),
+                });
+            }
+            const kp = crypto.x25519GenerateKeyPair();
+            shares.push({ algorithm: "x25519", privateKey: kp.secretKey, publicKey: kp.publicKey });
         }
-        const kp = crypto.x25519GenerateKeyPair();
-        shares.push({ algorithm: "x25519", privateKey: kp.secretKey, publicKey: kp.publicKey });
-    }
-    return shares;
+        return shares;
+    });
 }
 
 /** Concrete TLS 1.3 connection implementation. */
@@ -189,51 +217,51 @@ export class TlsConnectionImpl implements TlsConnection {
     /** The peer's leaf certificate, once the handshake has validated it. */
     public peerCertificate?: Certificate;
 
-    private readonly _transport!: Transport;
-    private readonly _profile!: ClientHelloConfig;
-    private readonly _serverName!: string;
-    private readonly _trustAnchors: readonly Uint8Array[] = [];
+    private readonly transport!: Transport;
+    private readonly profile!: ClientHelloConfig;
+    private readonly serverName!: string;
+    private readonly trustAnchors: readonly Uint8Array[] = [];
 
     /** Buffered bytes not yet consumed by the record framer. */
-    private _readBuffer: Uint8Array = new Uint8Array(0);
+    private readBuffer: Uint8Array = new Uint8Array(0);
     /** Running handshake transcript: full handshake messages (with 4-byte headers). */
-    private _transcript: Uint8Array[] = [];
+    private transcript: Uint8Array[] = [];
 
-    private _aead!: Parameters<typeof encryptRecord>[4];
-    private _hash!: HashId;
+    private aead!: Parameters<typeof encryptRecord>[4];
+    private hash!: HashId;
 
-    private _serverHello!: ServerHello;
+    private serverHello!: ServerHello;
 
-    private _clientHsTraffic!: TrafficSecrets;
-    private _serverHsTraffic!: TrafficSecrets;
-    private _clientHsTrafficSecret!: Uint8Array;
-    private _serverHsTrafficSecret!: Uint8Array;
-    private _masterSecret!: Uint8Array;
-    private _applicationSecrets!: ApplicationTrafficSecrets;
+    private clientHsTraffic!: TrafficSecrets;
+    private serverHsTraffic!: TrafficSecrets;
+    private clientHsTrafficSecret!: Uint8Array;
+    private serverHsTrafficSecret!: Uint8Array;
+    private masterSecret!: Uint8Array;
+    private applicationSecrets!: ApplicationTrafficSecrets;
 
-    private _clientHsSeq = 0;
-    private _serverHsSeq = 0;
-    private _clientAppSeq = 0;
-    private _serverAppSeq = 0;
+    private clientHsSeq = 0;
+    private serverHsSeq = 0;
+    private clientAppSeq = 0;
+    private serverAppSeq = 0;
 
     /** Decrypted application payloads awaiting consumption by read(). */
-    private _appReadQueue: Uint8Array[] = [];
+    private appReadQueue: Uint8Array[] = [];
 
     /** Lifecycle observers. */
-    private _closeListeners: ((reason: CloseReason) => void)[] = [];
-    private _errorListeners: ((error: TlsError) => void)[] = [];
+    private closeListeners: ((reason: CloseReason) => void)[] = [];
+    private errorListeners: ((error: TlsError) => void)[] = [];
 
     // `options` is optional so a connection can be constructed in isolation (e.g.
     // to assert on its default public fields) without a live transport. The real
     // entry point, connectTls, always supplies a full options object.
     constructor(options?: TlsOptions) {
         if (options !== undefined) {
-            this._transport = options.transport;
-            this._serverName = options.serverName;
-            this._trustAnchors = options.trustAnchors ?? [];
+            this.transport = options.transport;
+            this.serverName = options.serverName;
+            this.trustAnchors = options.trustAnchors ?? [];
 
             // An explicit alpnProtocols option overrides whatever the profile says.
-            this._profile =
+            this.profile =
                 options.alpnProtocols !== undefined && options.alpnProtocols.length > 0
                     ? { ...options.profile, alpnProtocols: options.alpnProtocols }
                     : options.profile;
@@ -252,36 +280,56 @@ export class TlsConnectionImpl implements TlsConnection {
         if (this.state.state === "open") {
             return;
         }
-        await this._withTimeout(timeoutMs, () => this._performHandshake());
+        await this.withTimeout(timeoutMs, () => this.performHandshake());
     }
 
     public async read(): Promise<ApplicationData> {
-        this._ensureOpen();
-        if (this._appReadQueue.length > 0) {
-            return { payload: this._appReadQueue.shift()! };
+        this.ensureOpen();
+        if (this.appReadQueue.length > 0) {
+            const payload = this.appReadQueue.shift();
+            if (payload === undefined) {
+                // Length was just checked; this is unreachable but required so the
+                // non-null assertion can be dropped under noUncheckedIndexedAccess.
+                throw new TlsHandshakeError("finished", {
+                    cause: new Error("application data queue emptied between check and shift"),
+                });
+            }
+            return { payload };
         }
         // Read encrypted records until an application-data payload arrives.
         for (;;) {
-            const { innerType, content } = await this._readEncryptedRecord(
-                this._applicationSecrets.server,
-                this._serverAppSeq,
+            const { innerType, content } = await this.readEncryptedRecord(
+                this.applicationSecrets.server,
+                this.serverAppSeq,
             );
-            this._serverAppSeq++;
+            this.serverAppSeq++;
             if (innerType === ContentType.APPLICATION_DATA) {
                 return { payload: content };
             }
-            this._handlePostHandshakeRecord(innerType, content);
+            this.handlePostHandshakeRecord(innerType, content);
         }
     }
 
-    public async write(data: Uint8Array): Promise<void> {
-        this._ensureOpen();
-        const traffic = this._applicationSecrets.client;
-        // Split into record-sized plaintext fragments (TLS records cap at 2^14 bytes).
-        for (let offset = 0; offset < data.length; offset += 16_384) {
-            const fragment = data.subarray(offset, Math.min(offset + 16_384, data.length));
-            this._writeEncryptedRecord(traffic, ContentType.APPLICATION_DATA, fragment, this._clientAppSeq);
-            this._clientAppSeq++;
+    public write(data: Uint8Array): Promise<void> {
+        // Not async: there are no awaits. Synchronous throws (e.g. ensureOpen) are
+        // caught and returned as a rejected promise so callers can await uniformly.
+        try {
+            this.ensureOpen();
+            const traffic = this.applicationSecrets.client;
+            // Split into record-sized plaintext fragments (TLS records cap at 2^14 bytes).
+            for (let offset = 0; offset < data.length; offset += 16_384) {
+                const fragment = data.subarray(offset, Math.min(offset + 16_384, data.length));
+                this.writeEncryptedRecord(
+                    traffic,
+                    ContentType.APPLICATION_DATA,
+                    fragment,
+                    this.clientAppSeq,
+                );
+                this.clientAppSeq++;
+            }
+            return Promise.resolve();
+        } catch (cause) {
+            return Promise.reject(ensureTlsError(cause));
         }
     }
 
@@ -295,28 +343,28 @@ export class TlsConnectionImpl implements TlsConnection {
         if (this.state.state === "open") {
             try {
                 const alert = new Uint8Array([0x01, 0x00]); // warning / close_notify
-                this._writeEncryptedRecord(
-                    this._applicationSecrets.client,
+                this.writeEncryptedRecord(
+                    this.applicationSecrets.client,
                     ContentType.ALERT,
                     alert,
-                    this._clientAppSeq,
+                    this.clientAppSeq,
                 );
             } catch {
                 // ignore — we are closing anyway
             }
         }
-        await this._transport.close();
-        this._transition({ state: "closed", reason: { kind: "close_notify" } });
-        for (const listener of this._closeListeners) {
+        await this.transport.close();
+        this.transition({ state: "closed", reason: { kind: "close_notify" } });
+        for (const listener of this.closeListeners) {
             listener({ kind: "close_notify" });
         }
     }
 
     public on(event: "close" | "error", listener: (arg: CloseReason | TlsError) => void): this {
         if (event === "close") {
-            this._closeListeners.push(listener as (reason: CloseReason) => void);
+            this.closeListeners.push(listener as (reason: CloseReason) => void);
         } else {
-            this._errorListeners.push(listener as (error: TlsError) => void);
+            this.errorListeners.push(listener as (error: TlsError) => void);
         }
         return this;
     }
@@ -325,18 +373,18 @@ export class TlsConnectionImpl implements TlsConnection {
     // Handshake state machine (RFC 8446).
     // -------------------------------------------------------------------------
 
-    private async _performHandshake(): Promise<void> {
+    private async performHandshake(): Promise<void> {
         this.state = { state: "handshaking" };
 
         // TLS 1.3 only: reject a profile that cannot negotiate TLS 1.3.
-        if (!this._profile.supportedVersions.some((v) => v.name === "TLS 1.3")) {
+        if (!this.profile.supportedVersions.some((v) => v.name === "TLS 1.3")) {
             throw new TlsHandshakeError("client_hello", {
                 cause: new Error("TLS 1.2-only handshakes are not supported by this client"),
             });
         }
 
         // 1. Generate key shares for the groups the crypto backend supports.
-        const desired = this._profile.keyShareGroups.filter((g) =>
+        const desired = this.profile.keyShareGroups.filter((g) =>
             (SUPPORTED_KEY_SHARE_GROUPS as readonly string[]).includes(g),
         );
         if (desired.length === 0) {
@@ -347,71 +395,71 @@ export class TlsConnectionImpl implements TlsConnection {
         const keyPairs = await generateKeyShares(desired);
 
         // 2. Build and send the ClientHello as a plaintext handshake record.
-        const clientHello = buildClientHello(this._profile, keyPairs);
-        this._transcript.push(clientHello);
-        await this._writeRecord(ContentType.HANDSHAKE, clientHello);
+        const clientHello = buildClientHello(this.profile, keyPairs);
+        this.transcript.push(clientHello);
+        await this.writeRecord(ContentType.HANDSHAKE, clientHello);
 
         // 3. Read the ServerHello (still plaintext) and validate the negotiation.
-        const shHeader = await this._readHeaderBytes();
-        const shRecord = await this._readRawRecord(shHeader);
+        const shHeader = await this.readHeaderBytes();
+        const shRecord = await this.readRawRecord(shHeader);
         if (shRecord.type !== ContentType.HANDSHAKE) {
             throw new TlsHandshakeError("server_hello", {
                 cause: new Error(`expected handshake record, got content type ${shRecord.type}`),
             });
         }
-        this._transcript.push(shRecord.fragment);
+        this.transcript.push(shRecord.fragment);
         const serverHello = parseServerHello(shRecord.fragment.subarray(4), {
-            cipherSuites: this._profile.cipherSuites,
-            supportedVersions: this._profile.supportedVersions,
+            cipherSuites: this.profile.cipherSuites,
+            supportedVersions: this.profile.supportedVersions,
         });
 
-        this._serverHello = serverHello;
+        this.serverHello = serverHello;
         this.cipherSuite = serverHello.cipherSuite;
         this.protocolVersion = serverHello.selectedVersion;
-        this._aead = cipherSuiteToAead(this.cipherSuite);
-        this._hash = hashFor(this.cipherSuite);
+        this.aead = cipherSuiteToAead(this.cipherSuite);
+        this.hash = hashFor(this.cipherSuite);
 
         // 4. (EC)DHE key exchange: recover the server's key share and compute the shared secret.
-        const sharedSecret = this._computeSharedSecret(serverHello, keyPairs);
+        const sharedSecret = this.computeSharedSecret(serverHello, keyPairs);
 
         // 5. Derive handshake traffic secrets from the ClientHello..ServerHello transcript.
-        const helloTranscript = this._transcriptHash();
+        const helloTranscript = this.transcriptHash();
         const { masterSecret, clientTrafficSecret, serverTrafficSecret } = deriveHandshakeTrafficSecrets(
             sharedSecret,
             helloTranscript,
             this.cipherSuite,
         );
-        this._masterSecret = masterSecret;
-        this._clientHsTrafficSecret = clientTrafficSecret;
-        this._serverHsTrafficSecret = serverTrafficSecret;
-        this._clientHsTraffic = deriveTrafficSecrets(clientTrafficSecret, this.cipherSuite, this._hash);
-        this._serverHsTraffic = deriveTrafficSecrets(serverTrafficSecret, this.cipherSuite, this._hash);
+        this.masterSecret = masterSecret;
+        this.clientHsTrafficSecret = clientTrafficSecret;
+        this.serverHsTrafficSecret = serverTrafficSecret;
+        this.clientHsTraffic = deriveTrafficSecrets(clientTrafficSecret, this.cipherSuite, this.hash);
+        this.serverHsTraffic = deriveTrafficSecrets(serverTrafficSecret, this.cipherSuite, this.hash);
 
         // 6. Consume the server's encrypted flight: EncryptedExtensions, Certificate,
         //    CertificateVerify, Finished.
-        await this._consumeServerFlight();
+        await this.consumeServerFlight();
 
         // 7. Derive application traffic secrets from the full handshake transcript.
-        const handshakeTranscript = this._transcriptHash();
-        this._applicationSecrets = deriveApplicationSecrets(
-            this._masterSecret,
+        const handshakeTranscript = this.transcriptHash();
+        this.applicationSecrets = deriveApplicationSecrets(
+            this.masterSecret,
             handshakeTranscript,
             this.cipherSuite,
         );
 
         // 8. Send the client Finished under the client handshake traffic key.
-        await this._sendClientFinished();
+        await this.sendClientFinished();
 
         // 9. Transition to the open state; negotiated parameters are already exposed
         //    on the public fields (cipherSuite, protocolVersion, alpnProtocol, ...).
         // Under exactOptionalPropertyTypes, `alpnProtocol?` must be omitted (not
         // `undefined`) when the server did not negotiate one.
-        this._transition({
+        this.transition({
             state: "open",
             sessionId: this.id,
             protocolVersion: this.protocolVersion,
             cipherSuite: this.cipherSuite,
-            ...(this.alpnProtocol !== undefined ? { alpnProtocol: this.alpnProtocol } : {}),
+            ...(this.alpnProtocol === undefined ? {} : { alpnProtocol: this.alpnProtocol }),
         });
     }
 
@@ -420,44 +468,44 @@ export class TlsConnectionImpl implements TlsConnection {
      * handshake state machine and updating the transcript. Server Finished is
      * verified against the transcript as it stood *before* the Finished message.
      */
-    private async _consumeServerFlight(): Promise<void> {
+    private async consumeServerFlight(): Promise<void> {
         // The server_hello_received phase, carrying the parsed ServerHello forward
         // so advanceHandshake can validate the rest of the flight against it.
         let phase: HandshakePhase = recordServerHello(
             { phase: "client_hello_sent" },
-            this._serverHello,
+            this.serverHello,
         );
 
         // EncryptedExtensions.
-        let message = await this._readEncryptedHandshakeMessage(
-            this._serverHsTraffic,
-            this._serverHsSeq,
+        let message = await this.readEncryptedHandshakeMessage(
+            this.serverHsTraffic,
+            this.serverHsSeq,
         );
-        this._serverHsSeq++;
+        this.serverHsSeq++;
         phase = advanceHandshake(phase, HandshakeType.ENCRYPTED_EXTENSIONS);
-        this._transcript.push(message.whole);
-        this._handleEncryptedExtensions(message.body);
+        this.transcript.push(message.whole);
+        this.handleEncryptedExtensions(message.body);
 
         // Certificate.
-        message = await this._readEncryptedHandshakeMessage(this._serverHsTraffic, this._serverHsSeq);
-        this._serverHsSeq++;
+        message = await this.readEncryptedHandshakeMessage(this.serverHsTraffic, this.serverHsSeq);
+        this.serverHsSeq++;
         phase = advanceHandshake(phase, HandshakeType.CERTIFICATE);
-        this._transcript.push(message.whole);
-        await this._handleCertificate(message.body);
+        this.transcript.push(message.whole);
+        await this.handleCertificate(message.body);
 
         // CertificateVerify.
-        message = await this._readEncryptedHandshakeMessage(this._serverHsTraffic, this._serverHsSeq);
-        this._serverHsSeq++;
+        message = await this.readEncryptedHandshakeMessage(this.serverHsTraffic, this.serverHsSeq);
+        this.serverHsSeq++;
         phase = advanceHandshake(phase, HandshakeType.CERTIFICATE_VERIFY);
-        this._transcript.push(message.whole);
+        this.transcript.push(message.whole);
 
         // Finished — verify against the transcript *before* appending the Finished.
-        const finishedTranscript = this._transcriptHash();
-        message = await this._readEncryptedHandshakeMessage(this._serverHsTraffic, this._serverHsSeq);
-        this._serverHsSeq++;
-        this._verifyServerFinished(message.body, finishedTranscript);
+        const finishedTranscript = this.transcriptHash();
+        message = await this.readEncryptedHandshakeMessage(this.serverHsTraffic, this.serverHsSeq);
+        this.serverHsSeq++;
+        this.verifyServerFinished(message.body, finishedTranscript);
         advanceHandshake(phase, HandshakeType.FINISHED);
-        this._transcript.push(message.whole);
+        this.transcript.push(message.whole);
     }
 
     // -------------------------------------------------------------------------
@@ -465,31 +513,31 @@ export class TlsConnectionImpl implements TlsConnection {
     // -------------------------------------------------------------------------
 
     /** Write an unencrypted record (used for the initial ClientHello/ServerHello). */
-    private async _writeRecord(type: ContentType, fragment: Uint8Array): Promise<void> {
-        await this._transport.write(concat(serializeRecordHeader(type, fragment.length), fragment));
+    private async writeRecord(type: ContentType, fragment: Uint8Array): Promise<void> {
+        await this.transport.write(concat(serializeRecordHeader(type, fragment.length), fragment));
     }
 
     /**
      * Read the 5-byte record header and return it raw (needed as AEAD AAD) plus
      * the parsed length. The caller is responsible for consuming the fragment.
      */
-    private async _readHeaderBytes(): Promise<{ raw: Uint8Array; length: number }> {
-        await this._ensureBytes(5);
-        const raw = this._readBuffer.subarray(0, 5);
+    private async readHeaderBytes(): Promise<{ raw: Uint8Array; length: number }> {
+        await this.ensureBytes(5);
+        const raw = this.readBuffer.subarray(0, 5);
         const parsed = parseRecordHeader(raw);
         return { raw, length: parsed.length };
     }
 
     /** Read a complete record given its already-consumed header. */
-    private async _readRawRecord(header: { raw: Uint8Array; length: number }): Promise<{
+    private async readRawRecord(header: { raw: Uint8Array; length: number }): Promise<{
         type: ContentType;
         fragment: Uint8Array;
     }> {
-        await this._ensureBytes(5 + header.length);
+        await this.ensureBytes(5 + header.length);
         // type is byte 0 of the header; parseRecordHeader already validated it.
         const type = header.raw[0] as ContentType;
-        const fragment = this._readBuffer.subarray(5, 5 + header.length);
-        this._readBuffer = this._readBuffer.subarray(5 + header.length);
+        const fragment = this.readBuffer.subarray(5, 5 + header.length);
+        this.readBuffer = this.readBuffer.subarray(5 + header.length);
         return { type, fragment };
     }
 
@@ -498,19 +546,19 @@ export class TlsConnectionImpl implements TlsConnection {
      * TLS 1.3 wraps encrypted handshake messages in records whose outer type is
      * application_data; the real type is the last non-zero byte of the plaintext.
      */
-    private async _readEncryptedRecord(
+    private async readEncryptedRecord(
         traffic: TrafficSecrets,
         seq: number,
     ): Promise<{ innerType: ContentType; content: Uint8Array }> {
-        const header = await this._readHeaderBytes();
-        const record = await this._readRawRecord(header);
+        const header = await this.readHeaderBytes();
+        const record = await this.readRawRecord(header);
         if (record.type !== ContentType.APPLICATION_DATA) {
             throw new TlsHandshakeError("finished", {
                 cause: new Error(`expected encrypted APPLICATION_DATA record, got ${record.type}`),
             });
         }
         const nonce = xorNonce(traffic.iv, seq);
-        const plaintext = decryptRecord(record.fragment, traffic.key, nonce, header.raw, this._aead);
+        const plaintext = decryptRecord(record.fragment, traffic.key, nonce, header.raw, this.aead);
         // plaintext = content || innerType || optional zero padding. Find the type.
         let end = plaintext.length;
         while (end > 0 && plaintext[end - 1] === 0) {
@@ -526,10 +574,10 @@ export class TlsConnectionImpl implements TlsConnection {
     }
 
     /** Pull bytes from the transport until at least `n` are buffered. */
-    private async _ensureBytes(n: number): Promise<void> {
-        while (this._readBuffer.length < n) {
-            const chunk = await this._transport.read();
-            this._readBuffer = concat(this._readBuffer, chunk);
+    private async ensureBytes(n: number): Promise<void> {
+        while (this.readBuffer.length < n) {
+            const chunk = await this.transport.read();
+            this.readBuffer = concat(this.readBuffer, chunk);
         }
     }
 
@@ -538,7 +586,7 @@ export class TlsConnectionImpl implements TlsConnection {
     // -------------------------------------------------------------------------
 
     /** Compute the (EC)DHE shared secret from the server's selected key share. */
-    private _computeSharedSecret(serverHello: ServerHello, keyPairs: readonly KeyPair[]): Uint8Array {
+    private computeSharedSecret(serverHello: ServerHello, keyPairs: readonly KeyPair[]): Uint8Array {
         const extensions = parseExtensions(serverHello.extensions);
         const keyShare = findExtension(extensions, ExtensionType.KEY_SHARE);
         if (keyShare === undefined) {
@@ -552,8 +600,19 @@ export class TlsConnectionImpl implements TlsConnection {
                 cause: new Error("key_share entry truncated"),
             });
         }
-        const group = wireToNamedGroup((keyShare.data[0]! << 8) | keyShare.data[1]!);
-        const keyLen = (keyShare.data[2]! << 8) | keyShare.data[3]!;
+        // The length check above guarantees indices 0..3 are in bounds, but
+        // noUncheckedIndexedAccess cannot prove it — read through locals.
+        const d0 = keyShare.data[0];
+        const d1 = keyShare.data[1];
+        const d2 = keyShare.data[2];
+        const d3 = keyShare.data[3];
+        if (d0 === undefined || d1 === undefined || d2 === undefined || d3 === undefined) {
+            throw new TlsHandshakeError("server_hello", {
+                cause: new Error("key_share entry data truncated"),
+            });
+        }
+        const group = wireToNamedGroup((d0 << 8) | d1);
+        const keyLen = (d2 << 8) | d3;
         if (keyLen + 4 !== keyShare.data.length) {
             throw new TlsHandshakeError("server_hello", {
                 cause: new Error("key_share key_exchange length mismatch"),
@@ -569,17 +628,25 @@ export class TlsConnectionImpl implements TlsConnection {
         switch (group) {
             case "x25519":
                 return crypto.x25519SharedSecret(myPair.privateKey, serverPublicKey);
-            default:
+            case "secp256r1":
+            case "secp384r1":
+            case "x448":
+                // @browsercore/crypto only exposes X25519 shared-secret today. Other
+                // (EC)DHE groups would need a backend we do not have — fail fast and
+                // typed rather than producing a bogus secret.
                 throw new TlsHandshakeError("server_hello", {
                     cause: new Error(`key exchange for group ${group} is not supported by the crypto backend`),
                 });
+            default:
+                // All NamedGroup members are handled above — this is unrepresentable.
+                return assertNever(group);
         }
     }
 
     /** Hash the current handshake transcript with the negotiated cipher's hash. */
-    private _transcriptHash(): Uint8Array {
-        const blob = concat(...this._transcript);
-        return this._hash === SHA_384 ? crypto.sha384(blob) : crypto.sha256(blob);
+    private transcriptHash(): Uint8Array {
+        const blob = concat(...this.transcript);
+        return this.hash === SHA_384 ? crypto.sha384(blob) : crypto.sha256(blob);
     }
 
     // -------------------------------------------------------------------------
@@ -587,19 +654,19 @@ export class TlsConnectionImpl implements TlsConnection {
     // -------------------------------------------------------------------------
 
     /** Read one encrypted handshake message, decrypting and stripping the inner type. */
-    private async _readEncryptedHandshakeMessage(
+    private async readEncryptedHandshakeMessage(
         traffic: TrafficSecrets,
         seq: number,
     ): Promise<{ whole: Uint8Array; body: Uint8Array }> {
-        const header = await this._readHeaderBytes();
-        const record = await this._readRawRecord(header);
+        const header = await this.readHeaderBytes();
+        const record = await this.readRawRecord(header);
         if (record.type !== ContentType.APPLICATION_DATA) {
             throw new TlsHandshakeError("finished", {
                 cause: new Error(`expected encrypted APPLICATION_DATA record, got ${record.type}`),
             });
         }
         const nonce = xorNonce(traffic.iv, seq);
-        const plaintext = decryptRecord(record.fragment, traffic.key, nonce, header.raw, this._aead);
+        const plaintext = decryptRecord(record.fragment, traffic.key, nonce, header.raw, this.aead);
         // plaintext = content || innerType || optional zero padding. Find the type.
         let end = plaintext.length;
         while (end > 0 && plaintext[end - 1] === 0) {
@@ -622,7 +689,7 @@ export class TlsConnectionImpl implements TlsConnection {
     }
 
     /** Extract the negotiated ALPN protocol from EncryptedExtensions, if any. */
-    private _handleEncryptedExtensions(body: Uint8Array): void {
+    private handleEncryptedExtensions(body: Uint8Array): void {
         const extensions = parseExtensions(body);
         const alpn = findExtension(extensions, ExtensionType.APPLICATION_LAYER_PROTOCOL_NEGOTIATION);
         if (alpn === undefined) {
@@ -632,33 +699,33 @@ export class TlsConnectionImpl implements TlsConnection {
         if (alpn.data.length < 3) {
             return;
         }
-        const nameLen = alpn.data[2]!;
-        if (3 + nameLen > alpn.data.length) {
+        const nameLen = alpn.data[2];
+        if (nameLen === undefined || 3 + nameLen > alpn.data.length) {
             return;
         }
         this.alpnProtocol = new TextDecoder().decode(alpn.data.subarray(3, 3 + nameLen));
     }
 
     /** Parse the Certificate message, validate hostname, and verify the chain. */
-    private async _handleCertificate(body: Uint8Array): Promise<void> {
-        const chain = this._parseCertificateMessage(body);
+    private async handleCertificate(body: Uint8Array): Promise<void> {
+        const chain = this.parseCertificateMessage(body);
         this.peerCertificate = chain.leaf;
-        if (!validateHostname(chain.leaf, this._serverName)) {
+        if (!validateHostname(chain.leaf, this.serverName)) {
             throw new TlsHandshakeError("certificate", {
-                cause: new Error(`hostname "${this._serverName}" does not match the leaf certificate`),
+                cause: new Error(`hostname "${this.serverName}" does not match the leaf certificate`),
             });
         }
         // Full chain verification requires trust anchors. Without them we still
         // performed hostname validation above; chain verification is best-effort.
-        if (this._trustAnchors.length > 0) {
+        if (this.trustAnchors.length > 0) {
             // Trust anchors arrive as raw DER root certificates; verifyChain wants
             // parsed TrustAnchor records (SPKI + subject). A trust anchor is a
             // self-signed root, so its issuer DN is also its subject.
-            const anchors = this._trustAnchors.map((der): TrustAnchor => {
+            const anchors = this.trustAnchors.map((der): TrustAnchor => {
                 const root = parseCertificate(der);
                 return { subjectPublicKeyInfo: root.subjectPublicKeyInfo, subject: root.issuer };
             });
-            await verifyChain(chain, anchors, this._serverName, Math.floor(Date.now() / 1000));
+            await verifyChain(chain, anchors, this.serverName, Math.floor(Date.now() / 1000));
         }
     }
 
@@ -667,11 +734,19 @@ export class TlsConnectionImpl implements TlsConnection {
      * body is: certificate_request_context (length-prefixed, len 1) then a
      * length-prefixed list of CertificateEntry { cert_data, extensions }.
      */
-    private _parseCertificateMessage(body: Uint8Array): CertificateChain {
+    private parseCertificateMessage(body: Uint8Array): CertificateChain {
         let o = 0;
-        const ctxLen = body[o++]!;
+        const readByte = (): number => {
+            if (o >= body.length) {
+                throw new TlsHandshakeError("certificate", {
+                    cause: new Error(`certificate message byte truncated at offset ${o}`),
+                });
+            }
+            return body[o++] as number;
+        };
+        const ctxLen = readByte();
         o += ctxLen;
-        const listLen = (body[o++]! << 16) | (body[o++]! << 8) | body[o++]!;
+        const listLen = (readByte() << 16) | (readByte() << 8) | readByte();
         const listEnd = o + listLen;
         if (listEnd > body.length) {
             throw new TlsHandshakeError("certificate", {
@@ -680,10 +755,10 @@ export class TlsConnectionImpl implements TlsConnection {
         }
         const certs: Certificate[] = [];
         while (o < listEnd) {
-            const certLen = (body[o++]! << 16) | (body[o++]! << 8) | body[o++]!;
+            const certLen = (readByte() << 16) | (readByte() << 8) | readByte();
             const certDer = body.subarray(o, o + certLen);
             o += certLen;
-            const extLen = (body[o++]! << 8) | body[o++]!;
+            const extLen = (readByte() << 8) | readByte();
             o += extLen;
             certs.push(parseCertificate(certDer));
         }
@@ -692,8 +767,14 @@ export class TlsConnectionImpl implements TlsConnection {
                 cause: new Error("server sent an empty certificate_list"),
             });
         }
-        const leaf = certs[0]!;
-        const root = certs[certs.length - 1]!;
+        // certs.length >= 1 guarantees both indices are in bounds.
+        const leaf = certs[0];
+        const root = certs.at(-1);
+        if (leaf === undefined || root === undefined) {
+            throw new TlsHandshakeError("certificate", {
+                cause: new Error("certificate list missing leaf or root"),
+            });
+        }
         const intermediates = certs.slice(1, certs.length - 1);
         return { leaf, intermediates, root };
     }
@@ -703,21 +784,21 @@ export class TlsConnectionImpl implements TlsConnection {
      * finished_key = HKDF-Expand-Label(server_traffic_secret, "finished", "", Hash.length)
      * and the transcript is ClientHello..CertificateVerify (everything before Finished).
      */
-    private _verifyServerFinished(body: Uint8Array, transcript: Uint8Array): void {
-        const hashLen = hashLengthFor(this._hash);
+    private verifyServerFinished(body: Uint8Array, transcript: Uint8Array): void {
+        const hashLen = hashLengthFor(this.hash);
         if (body.length !== hashLen) {
             throw new TlsHandshakeError("finished", {
                 cause: new Error(`server Finished length ${body.length} != expected ${hashLen}`),
             });
         }
         const finishedKey = hkdfExpandLabel(
-            this._serverHsTrafficSecret,
+            this.serverHsTrafficSecret,
             "finished",
             new Uint8Array(0),
             hashLen,
-            this._hash,
+            this.hash,
         );
-        const expected = crypto.hmac(this._hash, finishedKey, transcript);
+        const expected = crypto.hmac(this.hash, finishedKey, transcript);
         if (!constantTimeEqual(body, expected)) {
             throw new TlsHandshakeError("finished", {
                 cause: new Error("server Finished verify_data mismatch"),
@@ -726,25 +807,37 @@ export class TlsConnectionImpl implements TlsConnection {
     }
 
     /** Build and send the client Finished under the client handshake traffic key. */
-    private async _sendClientFinished(): Promise<void> {
-        const hashLen = hashLengthFor(this._hash);
-        const transcript = this._transcriptHash();
-        const finishedKey = hkdfExpandLabel(
-            this._clientHsTrafficSecret,
-            "finished",
-            new Uint8Array(0),
-            hashLen,
-            this._hash,
-        );
-        const verifyData = crypto.hmac(this._hash, finishedKey, transcript);
-        const message = new Uint8Array(4 + verifyData.length);
-        message[0] = HandshakeType.FINISHED;
-        message[1] = (verifyData.length >> 16) & 0xff;
-        message[2] = (verifyData.length >> 8) & 0xff;
-        message[3] = verifyData.length & 0xff;
-        message.set(verifyData, 4);
-        this._writeEncryptedRecord(this._clientHsTraffic, ContentType.HANDSHAKE, message, this._clientHsSeq);
-        this._clientHsSeq++;
+    private sendClientFinished(): Promise<void> {
+        // Not async: there are no awaits. Synchronous throws are caught and returned
+        // as a rejected promise so the caller can await uniformly.
+        try {
+            const hashLen = hashLengthFor(this.hash);
+            const transcript = this.transcriptHash();
+            const finishedKey = hkdfExpandLabel(
+                this.clientHsTrafficSecret,
+                "finished",
+                new Uint8Array(0),
+                hashLen,
+                this.hash,
+            );
+            const verifyData = crypto.hmac(this.hash, finishedKey, transcript);
+            const message = new Uint8Array(4 + verifyData.length);
+            message[0] = HandshakeType.FINISHED;
+            message[1] = (verifyData.length >> 16) & 0xff;
+            message[2] = (verifyData.length >> 8) & 0xff;
+            message[3] = verifyData.length & 0xff;
+            message.set(verifyData, 4);
+            this.writeEncryptedRecord(
+                this.clientHsTraffic,
+                ContentType.HANDSHAKE,
+                message,
+                this.clientHsSeq,
+            );
+            this.clientHsSeq++;
+            return Promise.resolve();
+        } catch (cause) {
+            return Promise.reject(ensureTlsError(cause));
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -756,7 +849,7 @@ export class TlsConnectionImpl implements TlsConnection {
      * outer type is application_data. The inner content type byte is appended to
      * the plaintext before encryption.
      */
-    private _writeEncryptedRecord(
+    private writeEncryptedRecord(
         traffic: TrafficSecrets,
         innerType: ContentType,
         content: Uint8Array,
@@ -768,21 +861,24 @@ export class TlsConnectionImpl implements TlsConnection {
             plaintext.length + AEAD_TAG_LENGTH,
         );
         const nonce = xorNonce(traffic.iv, seq);
-        const ciphertext = encryptRecord(plaintext, traffic.key, nonce, header, this._aead);
-        void this._transport.write(concat(header, ciphertext));
+        const ciphertext = encryptRecord(plaintext, traffic.key, nonce, header, this.aead);
+        void this.transport.write(concat(header, ciphertext));
     }
 
     /** Handle a non-application record encountered while reading application data. */
-    private _handlePostHandshakeRecord(innerType: ContentType, content: Uint8Array): void {
+    private handlePostHandshakeRecord(innerType: ContentType, content: Uint8Array): void {
         switch (innerType) {
             case ContentType.ALERT:
-                this._handleAlert(content);
+                this.handleAlert(content);
                 break;
             case ContentType.HANDSHAKE:
                 // Post-handshake handshake (e.g. NewSessionTicket, KeyUpdate) — out of
                 // scope for the happy path; ignore but do not error.
                 break;
-            default:
+            case ContentType.CHANGE_CIPHER_SPEC:
+            case ContentType.APPLICATION_DATA:
+                // Neither should appear here: application data is the only expected
+                // outer type, and TLS 1.3 has no change_cipher_spec. Reject typed.
                 throw new TlsHandshakeError("finished", {
                     cause: new Error(`unexpected post-handshake record type ${innerType}`),
                 });
@@ -790,28 +886,37 @@ export class TlsConnectionImpl implements TlsConnection {
     }
 
     /** Translate a received alert into a typed error and close the connection. */
-    private _handleAlert(content: Uint8Array): void {
+    private handleAlert(content: Uint8Array): void {
         if (content.length < 2) {
-            this._emitError(
+            this.emitError(
                 ensureTlsError(new TlsAlertError("fatal", 0, { cause: new Error("truncated alert record") })),
             );
             return;
         }
-        const level = content[0]! === 0x02 ? "fatal" : "warning";
-        const description = content[1]!;
-        if (description === 0) {
-            // close_notify — graceful.
-            this._transition({ state: "closed", reason: { kind: "close_notify" } });
+        // content.length >= 2 (checked above) guarantees both indices are in bounds,
+        // but noUncheckedIndexedAccess cannot prove it — read through locals.
+        const levelByte = content[0];
+        const description = content[1];
+        if (levelByte === undefined || description === undefined) {
+            this.emitError(
+                ensureTlsError(new TlsAlertError("fatal", 0, { cause: new Error("truncated alert record") })),
+            );
             return;
         }
-        this._emitError(ensureTlsError(new TlsAlertError(level, description)));
+        const level = levelByte === 0x02 ? "fatal" : "warning";
+        if (description === 0) {
+            // close_notify — graceful.
+            this.transition({ state: "closed", reason: { kind: "close_notify" } });
+            return;
+        }
+        this.emitError(ensureTlsError(new TlsAlertError(level, description)));
     }
 
     // -------------------------------------------------------------------------
     // Timeouts + lifecycle.
     // -------------------------------------------------------------------------
 
-    private async _withTimeout(ms: number, run: () => Promise<void>): Promise<void> {
+    private async withTimeout(ms: number, run: () => Promise<void>): Promise<void> {
         let timer: NodeJS.Timeout | undefined;
         const timeout = new Promise<never>((_, reject) => {
             timer = setTimeout(() => {
@@ -831,7 +936,7 @@ export class TlsConnectionImpl implements TlsConnection {
         }
     }
 
-    private _ensureOpen(): void {
+    private ensureOpen(): void {
         if (this.state.state !== "open") {
             throw new TlsHandshakeError("finished", {
                 cause: new Error(`connection not open (state: ${this.state.state})`),
@@ -839,12 +944,12 @@ export class TlsConnectionImpl implements TlsConnection {
         }
     }
 
-    private _transition(next: TlsState): void {
+    private transition(next: TlsState): void {
         this.state = next;
     }
 
-    private _emitError(error: TlsError): void {
-        for (const listener of this._errorListeners) {
+    private emitError(error: TlsError): void {
+        for (const listener of this.errorListeners) {
             listener(error);
         }
     }

@@ -1,0 +1,202 @@
+/**
+ * Tests for @browsercore/tls extensions (RFC 8446 §4.2, RFC 6066).
+ *
+ * Covers the parser (happy path + every malformed-input branch), the wire
+ * encoders/decoders for signature schemes and named groups, findExtension, and
+ * the five build* stubs (which throw "not implemented" — their throw statements
+ * are real code and must be covered).
+ */
+
+import { describe, it, expect } from "vitest";
+import {
+    ExtensionType,
+    parseExtensions,
+    findExtension,
+    signatureSchemeToWire,
+    namedGroupToWire,
+    wireToNamedGroup,
+    buildServerNameList,
+    buildSupportedVersions,
+    buildKeyShare,
+    buildSignatureAlgorithms,
+    buildAlpn,
+} from "../src/extensions/extensions.js";
+import { TlsHandshakeError } from "../src/errors.js";
+import type { NamedGroup, ProtocolVersion, SignatureScheme } from "../src/types.js";
+import { TLS_1_3 } from "../src/types.js";
+
+/** Serialize one extension: type(2) || data_len(2) || data. */
+function ext(type: ExtensionType, data: Uint8Array): Uint8Array {
+    const out = new Uint8Array(2 + 2 + data.length);
+    out[0] = (type >> 8) & 0xff;
+    out[1] = type & 0xff;
+    out[2] = (data.length >> 8) & 0xff;
+    out[3] = data.length & 0xff;
+    out.set(data, 4);
+    return out;
+}
+
+/** Wrap a list of serialized extensions under the 2-byte length prefix. */
+function extensionsBlock(...extensions: readonly Uint8Array[]): Uint8Array {
+    let total = 0;
+    for (const e of extensions) {
+        total += e.length;
+    }
+    const out = new Uint8Array(2 + total);
+    out[0] = (total >> 8) & 0xff;
+    out[1] = total & 0xff;
+    let o = 2;
+    for (const e of extensions) {
+        out.set(e, o);
+        o += e.length;
+    }
+    return out;
+}
+
+describe("parseExtensions", () => {
+    it("parses a block with multiple extensions", () => {
+        const a = ext(ExtensionType.SUPPORTED_VERSIONS, new Uint8Array([0x03, 0x04]));
+        const b = ext(ExtensionType.KEY_SHARE, new Uint8Array([0x00, 0x1d, 0x00, 0x01, 0x42]));
+        const block = extensionsBlock(a, b);
+        const parsed = parseExtensions(block);
+        expect(parsed).toHaveLength(2);
+        expect(parsed[0]!.type).toBe(ExtensionType.SUPPORTED_VERSIONS);
+        expect(parsed[0]!.data).toEqual(new Uint8Array([0x03, 0x04]));
+        expect(parsed[1]!.type).toBe(ExtensionType.KEY_SHARE);
+        expect(parsed[1]!.data).toEqual(new Uint8Array([0x00, 0x1d, 0x00, 0x01, 0x42]));
+    });
+
+    it("parses an empty extensions block", () => {
+        const block = new Uint8Array([0x00, 0x00]);
+        expect(parseExtensions(block)).toEqual([]);
+    });
+
+    it("throws TlsHandshakeError when the buffer is shorter than the 2-byte length prefix", () => {
+        expect(() => parseExtensions(new Uint8Array([0x00]))).toThrow(TlsHandshakeError);
+    });
+
+    it("throws TlsHandshakeError when the length prefix exceeds the buffer", () => {
+        // extensions_len says 10 bytes follow, but only 2 do.
+        const block = new Uint8Array([0x00, 0x0a, 0x00, 0x2b]);
+        expect(() => parseExtensions(block)).toThrow(TlsHandshakeError);
+    });
+
+    it("throws TlsHandshakeError when an extension header is truncated", () => {
+        // extensions_len = 3, buffer is exactly 2 + 3 = 5 bytes (outer check
+        // passes), but reading the 4-byte extension header needs o + 4 = 6 > end = 5.
+        const block = new Uint8Array([0x00, 0x03, 0x00, 0x2b, 0x00]);
+        try {
+            parseExtensions(block);
+            expect.unreachable("expected a throw");
+        } catch (e) {
+            const err = e as TlsHandshakeError;
+            expect(err).toBeInstanceOf(TlsHandshakeError);
+            expect(err.cause?.message).toMatch(/extension header truncated/);
+        }
+    });
+
+    it("throws TlsHandshakeError when extension data is truncated", () => {
+        // extensions_len = 6, buffer is exactly 2 + 6 = 8 bytes (outer check
+        // passes). One extension: type=43, data_len=4, but only 2 bytes of data
+        // present, so o + dataLen = 6 + 4 = 10 > end = 8.
+        const block = new Uint8Array([0x00, 0x06, 0x00, 0x2b, 0x00, 0x04, 0x03, 0x00]);
+        try {
+            parseExtensions(block);
+            expect.unreachable("expected a throw");
+        } catch (e) {
+            const err = e as TlsHandshakeError;
+            expect(err).toBeInstanceOf(TlsHandshakeError);
+            expect(err.cause?.message).toMatch(/extension data truncated/);
+        }
+    });
+});
+
+describe("findExtension", () => {
+    it("finds the first extension of the requested type", () => {
+        const block = extensionsBlock(
+            ext(ExtensionType.SERVER_NAME, new Uint8Array([0x00])),
+            ext(ExtensionType.SUPPORTED_VERSIONS, new Uint8Array([0x03, 0x04])),
+        );
+        const parsed = parseExtensions(block);
+        const found = findExtension(parsed, ExtensionType.SUPPORTED_VERSIONS);
+        expect(found).toBeDefined();
+        expect(found!.data).toEqual(new Uint8Array([0x03, 0x04]));
+    });
+
+    it("returns undefined when the requested type is absent", () => {
+        const block = extensionsBlock(ext(ExtensionType.SERVER_NAME, new Uint8Array([0x00])));
+        const parsed = parseExtensions(block);
+        expect(findExtension(parsed, ExtensionType.SUPPORTED_VERSIONS)).toBeUndefined();
+    });
+});
+
+describe("signatureSchemeToWire", () => {
+    it("maps every advertised signature scheme to its IANA wire value", () => {
+        const cases: ReadonlyArray<[SignatureScheme, number]> = [
+            ["ecdsa_secp256r1_sha256", 0x0403],
+            ["ecdsa_secp384r1_sha384", 0x0503],
+            ["rsa_pss_rsae_sha256", 0x0804],
+            ["rsa_pss_rsae_sha384", 0x0805],
+            ["rsa_pkcs1_sha256", 0x0401],
+        ];
+        for (const [scheme, wire] of cases) {
+            expect(signatureSchemeToWire(scheme)).toBe(wire);
+        }
+    });
+});
+
+describe("namedGroupToWire", () => {
+    it("maps every named group to its IANA wire value", () => {
+        const cases: ReadonlyArray<[NamedGroup, number]> = [
+            ["secp256r1", 0x0017],
+            ["secp384r1", 0x0018],
+            ["x25519", 0x001d],
+            ["x448", 0x001e],
+        ];
+        for (const [group, wire] of cases) {
+            expect(namedGroupToWire(group)).toBe(wire);
+        }
+    });
+});
+
+describe("wireToNamedGroup", () => {
+    it("inverts every IANA wire value to its named group", () => {
+        expect(wireToNamedGroup(0x0017)).toBe("secp256r1");
+        expect(wireToNamedGroup(0x0018)).toBe("secp384r1");
+        expect(wireToNamedGroup(0x001d)).toBe("x25519");
+        expect(wireToNamedGroup(0x001e)).toBe("x448");
+    });
+
+    it("throws TlsHandshakeError for an unsupported wire value", () => {
+        expect(() => wireToNamedGroup(0x0099)).toThrow(TlsHandshakeError);
+        try {
+            wireToNamedGroup(0x0099);
+        } catch (e) {
+            const err = e as TlsHandshakeError;
+            expect(err.phase).toBe("server_hello");
+            expect(err.cause?.message).toMatch(/unsupported named group/);
+        }
+    });
+});
+
+describe("build* stubs (not yet implemented)", () => {
+    it("buildServerNameList throws", () => {
+        expect(() => buildServerNameList("example.com")).toThrow(/not implemented/);
+    });
+
+    it("buildSupportedVersions throws", () => {
+        expect(() => buildSupportedVersions([TLS_1_3])).toThrow(/not implemented/);
+    });
+
+    it("buildKeyShare throws", () => {
+        expect(() => buildKeyShare([{ group: "x25519", keyExchange: new Uint8Array(32) }])).toThrow(/not implemented/);
+    });
+
+    it("buildSignatureAlgorithms throws", () => {
+        expect(() => buildSignatureAlgorithms(["ecdsa_secp256r1_sha256"])).toThrow(/not implemented/);
+    });
+
+    it("buildAlpn throws", () => {
+        expect(() => buildAlpn(["h2", "http/1.1"])).toThrow(/not implemented/);
+    });
+});

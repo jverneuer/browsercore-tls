@@ -53,6 +53,8 @@ export function cipherSuiteToAead(cipherSuite: CipherSuite): AeadAlgorithm {
             return "AES-256-GCM";
         case "TLS_CHACHA20_POLY1305_SHA256":
             return "CHACHA20-POLY1305";
+        default:
+            return assertNever(cipherSuite);
     }
 }
 
@@ -75,8 +77,17 @@ export function parseRecordHeader(buf: Uint8Array): RecordHeader {
     ) {
         throw new TlsDecryptError("record", { cause: new Error(`invalid content type: ${type}`) });
     }
-    const version = (buf[1]! << 8) | buf[2]!;
-    const length = (buf[3]! << 8) | buf[4]!;
+    const b1 = buf[1];
+    const b2 = buf[2];
+    const b3 = buf[3];
+    const b4 = buf[4];
+    if (b1 === undefined || b2 === undefined || b3 === undefined || b4 === undefined) {
+        throw new TlsDecryptError("record", {
+            cause: new Error(`record header truncated: ${buf.length} < ${RECORD_HEADER_SIZE}`),
+        });
+    }
+    const version = (b1 << 8) | b2;
+    const length = (b3 << 8) | b4;
     return { type, version, length };
 }
 

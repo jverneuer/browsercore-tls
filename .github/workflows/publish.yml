@@ -16,7 +16,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 26
           registry-url: https://registry.npmjs.org
       - run: npm install
       - run: npm run build

@@ -40,10 +40,14 @@ export class TlsHandshakeError extends Error {
     public override readonly cause: Error | undefined;
 
     constructor(phase: HandshakePhase, options?: { cause?: Error }) {
-        super(`TLS handshake failed during ${phase}`);
+        const cause = options?.cause;
+        // Surface the underlying cause in the message so the specific reason is
+        // visible without drilling into `.cause`; the cause is still attached for
+        // programmatic inspection (matching the convention in the other test files).
+        super(cause ? `TLS handshake failed during ${phase}: ${cause.message}` : `TLS handshake failed during ${phase}`);
         this.name = "TlsHandshakeError";
         this.phase = phase;
-        this.cause = options?.cause;
+        this.cause = cause;
     }
 }
 

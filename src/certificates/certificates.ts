@@ -9,7 +9,7 @@
 
 import { crypto } from "@browsercore/crypto";
 import type { SignatureScheme } from "../types.js";
-import { TlsHandshakeError } from "../errors.js";
+import { TlsHandshakeError, ensureTlsError } from "../errors.js";
 
 // ---------------------------------------------------------------------------
 // Minimal DER parsing primitives.
@@ -39,7 +39,7 @@ function readTlv(buf: Uint8Array, pos: number): Tlv {
         });
     }
     const start = pos;
-    const tagByte = buf[pos++]!;
+    const tagByte = buf[pos++] as number;
     // We only handle single-byte tags (tag number < 31); X.509 never uses the
     // long form for the tags we care about.
     if ((tagByte & 0x1f) === 0x1f) {
@@ -54,7 +54,7 @@ function readTlv(buf: Uint8Array, pos: number): Tlv {
             cause: new Error(`DER length truncated at offset ${pos}`),
         });
     }
-    const lengthByte = buf[pos++]!;
+    const lengthByte = buf[pos++] as number;
     let valueStart: number;
     let length: number;
     if ((lengthByte & 0x80) === 0) {
@@ -76,7 +76,7 @@ function readTlv(buf: Uint8Array, pos: number): Tlv {
         }
         length = 0;
         for (let i = 0; i < numBytes; i++) {
-            length = (length << 8) | buf[pos++]!;
+            length = (length << 8) | (buf[pos++] as number);
         }
         valueStart = pos;
     }
@@ -96,7 +96,7 @@ function peekTag(buf: Uint8Array, pos: number): number {
             cause: new Error(`DER truncated while peeking tag at offset ${pos}`),
         });
     }
-    return buf[pos]!;
+    return buf[pos] as number;
 }
 
 /** Parse a DER OID (without its tag/length) into its dotted-arc string. */
@@ -107,7 +107,7 @@ function parseOid(buf: Uint8Array, start: number, end: number): string {
         });
     }
     // The first byte encodes the first two arcs: floor(first / 40), first % 40.
-    const first = buf[start]!;
+    const first = buf[start] as number;
     const arcs: number[] = [Math.floor(first / 40), first % 40];
     let i = start + 1;
     while (i < end) {
@@ -120,7 +120,7 @@ function parseOid(buf: Uint8Array, start: number, end: number): string {
                     cause: new Error("OID arc truncated"),
                 });
             }
-            b = buf[i++]!;
+            b = buf[i++] as number;
             // Guard against overflow on absurdly long arcs.
             value = (value << 7) | (b & 0x7f);
         } while ((b & 0x80) !== 0);
@@ -167,7 +167,7 @@ function parseTime(buf: Uint8Array, start: number, end: number, tag: number): nu
         });
     }
     const yearStr = str.slice(0, isUtc ? 2 : 4);
-    let year = Number.parseInt(yearStr, 10);
+    let year = Math.trunc(Number(yearStr));
     if (Number.isNaN(year)) {
         throw new TlsHandshakeError("certificate", {
             cause: new Error(`invalid year in ASN.1 TIME: "${str}"`),
@@ -177,11 +177,11 @@ function parseTime(buf: Uint8Array, start: number, end: number, tag: number): nu
         // RFC 5280: UTCTime years 50..99 => 1950..1999; 00..49 => 2000..2049.
         year += year >= 50 ? 1900 : 2000;
     }
-    const month = Number.parseInt(str.slice(isUtc ? 2 : 4, isUtc ? 4 : 6), 10) - 1;
-    const day = Number.parseInt(str.slice(isUtc ? 4 : 6, isUtc ? 6 : 8), 10);
-    const hour = Number.parseInt(str.slice(isUtc ? 6 : 8, isUtc ? 8 : 10), 10);
-    const minute = Number.parseInt(str.slice(isUtc ? 8 : 10, isUtc ? 10 : 12), 10);
-    const second = Number.parseInt(str.slice(isUtc ? 10 : 12, isUtc ? 12 : 14), 10);
+    const month = Math.trunc(Number(str.slice(isUtc ? 2 : 4, isUtc ? 4 : 6))) - 1;
+    const day = Math.trunc(Number(str.slice(isUtc ? 4 : 6, isUtc ? 6 : 8)));
+    const hour = Math.trunc(Number(str.slice(isUtc ? 6 : 8, isUtc ? 8 : 10)));
+    const minute = Math.trunc(Number(str.slice(isUtc ? 8 : 10, isUtc ? 10 : 12)));
+    const second = Math.trunc(Number(str.slice(isUtc ? 10 : 12, isUtc ? 12 : 14)));
 
     // Date.UTC returns ms since epoch in UTC.
     const ms = Date.UTC(year, month, day, hour, minute, second);
@@ -365,7 +365,6 @@ export function parseCertificate(buf: Uint8Array): Certificate {
                     case "2.5.29.19":
                         isCa = parseBasicConstraints(ext.value);
                         break;
-                    case "2.5.29.35":
                     default:
                         break;
                 }
@@ -450,7 +449,7 @@ function parseName(buf: Uint8Array, start: number, _end: number): string {
         if (setTlv.tag !== 0x31) {
             break;
         }
-        let p = setTlv.valueStart;
+        const p = setTlv.valueStart;
         if (p >= setTlv.end) {
             o = setTlv.end;
             continue;
@@ -605,7 +604,11 @@ function parseKeyUsage(value: Uint8Array): {
         const pos = bitPosition(index);
         const byteIndex = Math.floor(pos / 8);
         const bitInByte = pos % 8;
-        return (usedBytes[byteIndex]! & (1 << (7 - bitInByte))) !== 0;
+        const byte = usedBytes[byteIndex];
+        if (byte === undefined) {
+            return false;
+        }
+        return (byte & (1 << (7 - bitInByte))) !== 0;
     };
     return {
         digitalSignature: getBit(0),
@@ -626,7 +629,8 @@ function parseBasicConstraints(value: Uint8Array): boolean {
         return false;
     }
     const boolTlv = readTlv(value, seq.valueStart);
-    return value[boolTlv.valueStart] !== 0;
+    const boolByte = value[boolTlv.valueStart];
+    return boolByte !== undefined && boolByte !== 0;
 }
 
 /**
@@ -675,73 +679,93 @@ function matchDnsName(pattern: string, hostname: string): boolean {
  * Signature verification is delegated to @browsercore/crypto. Throws
  * {@link TlsHandshakeError} with phase "certificate" on any failure.
  */
-export async function verifyChain(
+export function verifyChain(
     chain: CertificateChain,
     trustAnchors: readonly TrustAnchor[],
     hostname: string,
     now: number,
 ): Promise<void> {
-    const certs = [chain.leaf, ...chain.intermediates, chain.root];
+    // Not async: crypto.verifySignature returns a synchronous boolean (awaiting it
+    // would be an error). Synchronous throws are caught and returned as a rejected
+    // promise so callers can await uniformly; the original TlsHandshakeError is
+    // propagated as-is (not re-wrapped) so its type reaches the caller.
+    try {
+        const certs = [chain.leaf, ...chain.intermediates, chain.root];
 
-    // 1. Validity windows: every cert must currently be valid.
-    for (const cert of certs) {
-        if (now < cert.notBefore || now > cert.notAfter) {
-            throw new TlsHandshakeError("certificate", {
-                cause: new Error(
-                    `certificate ${cert.issuer} not valid at ${now} (valid ${cert.notBefore}..${cert.notAfter})`,
-                ),
-            });
+        // 1. Validity windows: every cert must currently be valid.
+        for (const cert of certs) {
+            if (now < cert.notBefore || now > cert.notAfter) {
+                throw new TlsHandshakeError("certificate", {
+                    cause: new Error(
+                        `certificate ${cert.issuer} not valid at ${now} (valid ${cert.notBefore}..${cert.notAfter})`,
+                    ),
+                });
+            }
         }
-    }
 
-    // 2. basicConstraints CA flags: every intermediate must be a CA. The root
-    //    is authorized by the trust-anchor SPKI match (step 4), not by its own
-    //    basicConstraints, so a self-signed trust anchor need not set cA.
-    for (const cert of chain.intermediates) {
-        if (!cert.isCa) {
-            throw new TlsHandshakeError("certificate", {
-                cause: new Error(`intermediate certificate ${cert.issuer} is missing basicConstraints cA`),
-            });
+        // 2. basicConstraints CA flags: every intermediate must be a CA. The root
+        //    is authorized by the trust-anchor SPKI match (step 4), not by its own
+        //    basicConstraints, so a self-signed trust anchor need not set cA.
+        for (const cert of chain.intermediates) {
+            if (!cert.isCa) {
+                throw new TlsHandshakeError("certificate", {
+                    cause: new Error(`intermediate certificate ${cert.issuer} is missing basicConstraints cA`),
+                });
+            }
         }
-    }
 
-    // 3. For each (subject, issuer) pair, verify the signature. The issuer's
-    //    public key (SPKI) verifies the subject's signature over its TBSCertificate.
-    const subjects = [chain.leaf, ...chain.intermediates];
-    const issuers = [...chain.intermediates, chain.root];
-    for (let i = 0; i < subjects.length; i++) {
-        const subject = subjects[i]!;
-        const issuer = issuers[i]!;
-        const ok = await crypto.verifySignature(
-            subject.signatureScheme,
-            issuer.subjectPublicKeyInfo,
-            subject.signatureValue,
-            subject.tbsBytes,
+        // 3. For each (subject, issuer) pair, verify the signature. The issuer's
+        //    public key (SPKI) verifies the subject's signature over its TBSCertificate.
+        const subjects = [chain.leaf, ...chain.intermediates];
+        const issuers = [...chain.intermediates, chain.root];
+        for (let i = 0; i < subjects.length; i++) {
+            const subject = subjects[i];
+            const issuer = issuers[i];
+            if (subject === undefined || issuer === undefined) {
+                throw new TlsHandshakeError("certificate", {
+                    cause: new Error(`certificate chain entry at index ${i} is missing`),
+                });
+            }
+            const ok = crypto.verifySignature(
+                subject.signatureScheme,
+                issuer.subjectPublicKeyInfo,
+                subject.signatureValue,
+                subject.tbsBytes,
+            );
+            if (!ok) {
+                throw new TlsHandshakeError("certificate", {
+                    cause: new Error(
+                        `signature verification failed: ${subject.issuer} not signed by ${issuer.issuer}`,
+                    ),
+                });
+            }
+        }
+
+        // 4. The chain root's SPKI must match one of the trust anchors.
+        const rootTrusted = trustAnchors.some((ta) =>
+            constantTimeEqual(ta.subjectPublicKeyInfo, chain.root.subjectPublicKeyInfo),
         );
-        if (!ok) {
+        if (!rootTrusted) {
             throw new TlsHandshakeError("certificate", {
-                cause: new Error(
-                    `signature verification failed: ${subject.issuer} not signed by ${issuer.issuer}`,
-                ),
+                cause: new Error(`root certificate ${chain.root.issuer} does not match any trust anchor`),
             });
         }
-    }
 
-    // 4. The chain root's SPKI must match one of the trust anchors.
-    const rootTrusted = trustAnchors.some((ta) =>
-        constantTimeEqual(ta.subjectPublicKeyInfo, chain.root.subjectPublicKeyInfo),
-    );
-    if (!rootTrusted) {
-        throw new TlsHandshakeError("certificate", {
-            cause: new Error(`root certificate ${chain.root.issuer} does not match any trust anchor`),
-        });
-    }
-
-    // 5. Hostname validation against the leaf.
-    if (!validateHostname(chain.leaf, hostname)) {
-        throw new TlsHandshakeError("certificate", {
-            cause: new Error(`hostname "${hostname}" does not match leaf certificate`),
-        });
+        // 5. Hostname validation against the leaf.
+        if (!validateHostname(chain.leaf, hostname)) {
+            throw new TlsHandshakeError("certificate", {
+                cause: new Error(`hostname "${hostname}" does not match leaf certificate`),
+            });
+        }
+        return Promise.resolve();
+    } catch (cause) {
+        // Every throw in the body is a TlsHandshakeError (an Error); keep the
+        // original rejection so its type reaches the caller. Only fall back to a
+        // generic TlsError if a non-Error somehow escapes.
+        if (cause instanceof Error) {
+            return Promise.reject(cause);
+        }
+        return Promise.reject(ensureTlsError(cause));
     }
 }
 
@@ -756,7 +780,7 @@ export function pemToDer(pem: string): Uint8Array {
     }
     const body = pem.slice(begin + beginMarker.length, end);
     // Strip all whitespace (newlines, spaces) and base64-decode.
-    const cleaned = body.replace(/\s+/g, "");
+    const cleaned = body.replaceAll(/\s+/gu, "");
     const binary = base64Decode(cleaned);
     return new Uint8Array(binary);
 }
@@ -772,7 +796,13 @@ function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
     }
     let diff = 0;
     for (let i = 0; i < a.length; i++) {
-        diff |= a[i]! ^ b[i]!;
+        const ai = a[i];
+        const bi = b[i];
+        // a and b are length-equal (checked above), so both indices are in range.
+        if (ai === undefined || bi === undefined) {
+            return false;
+        }
+        diff |= ai ^ bi;
     }
     return diff === 0;
 }
@@ -782,7 +812,10 @@ function base64Decode(input: string): Uint8Array {
     const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     const decodeTable = new Int16Array(128).fill(-1);
     for (let i = 0; i < alphabet.length; i++) {
-        decodeTable[alphabet.charCodeAt(i)] = i;
+        const code = alphabet.codePointAt(i);
+        if (code !== undefined) {
+            decodeTable[code] = i;
+        }
     }
     // Strip padding to compute output length.
     let padding = 0;
@@ -800,8 +833,12 @@ function base64Decode(input: string): Uint8Array {
     let bitsCollected = 0;
     let outIndex = 0;
     for (let i = 0; i < cleanLen; i++) {
-        const value = decodeTable[input.charCodeAt(i)]!;
-        if (value < 0) {
+        const code = input.codePointAt(i);
+        if (code === undefined) {
+            continue;
+        }
+        const value = decodeTable[code];
+        if (value === undefined || value < 0) {
             continue; // skip any non-alphabet char (shouldn't happen post-clean)
         }
         buffer = (buffer << 6) | value;

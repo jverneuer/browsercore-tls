@@ -1,5 +1,10 @@
 # @browsercore/tls
 
+
+[![npm version](https://img.shields.io/npm/v/@browsercore/tls)](https://www.npmjs.com/package/@browsercore/tls)
+[![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jverneuer/browsercore-tls/main/coverage/badge.json)](https://github.com/jverneuer/browsercore-tls/blob/main/COVERAGE.md)
+[![lint](https://img.shields.io/github/actions/workflow/status/jverneuer/browsercore-tls/ci.yml?label=lint)](https://github.com/jverneuer/browsercore-tls/actions/workflows/ci.yml)
+
 A TLS 1.3 (and 1.2 fallback) client implemented entirely in TypeScript.
 
 ## Responsibility
