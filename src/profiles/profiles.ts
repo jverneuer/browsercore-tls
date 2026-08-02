@@ -1,0 +1,84 @@
+/**
+ * ClientHello configuration profiles (placeholder).
+ *
+ * This module defines the local `TlsProfile` shape and a couple of example
+ * configurations. Once @network/profiles is built, it becomes the single source
+ * of truth and this module will re-export from there. Keeping the shape here
+ * avoids a circular dependency while @network/profiles is not yet ready.
+ */
+
+import type { ClientHelloConfig } from "../types.js";
+
+/**
+ * A TLS profile: a named, reusable ClientHello configuration.
+ * Higher layers (HTTP/2, fetch) select a profile by name.
+ */
+export interface TlsProfile {
+    readonly name: string;
+    readonly config: ClientHelloConfig;
+}
+
+/** TLS 1.3 only, modern ciphers, X25519 + secp256r1 key shares. */
+export const MODERN_TLS13_PROFILE: TlsProfile = {
+    name: "modern-tls13",
+    config: {
+        cipherSuites: [
+            "TLS_AES_256_GCM_SHA384",
+            "TLS_AES_128_GCM_SHA256",
+            "TLS_CHACHA20_POLY1305_SHA256",
+        ],
+        keyShareGroups: ["x25519", "secp256r1"],
+        signatureAlgorithms: [
+            "ecdsa_secp256r1_sha256",
+            "rsa_pss_rsae_sha256",
+            "rsa_pss_rsae_sha384",
+        ],
+        supportedVersions: [{ name: "TLS 1.3", wire: 0x0304 }],
+        serverName: "",
+    },
+};
+
+/** TLS 1.2 fallback profile for legacy servers. */
+export const COMPATIBILITY_PROFILE: TlsProfile = {
+    name: "compatibility",
+    config: {
+        cipherSuites: [
+            "TLS_AES_256_GCM_SHA384",
+            "TLS_AES_128_GCM_SHA256",
+            "TLS_CHACHA20_POLY1305_SHA256",
+        ],
+        keyShareGroups: ["x25519", "secp256r1", "secp384r1"],
+        signatureAlgorithms: [
+            "ecdsa_secp256r1_sha256",
+            "ecdsa_secp384r1_sha384",
+            "rsa_pss_rsae_sha256",
+            "rsa_pkcs1_sha256",
+        ],
+        supportedVersions: [
+            { name: "TLS 1.3", wire: 0x0304 },
+            { name: "TLS 1.2", wire: 0x0303 },
+        ],
+        serverName: "",
+    },
+};
+
+/** Registry of profiles by name. */
+export const PROFILES: Readonly<Record<string, TlsProfile>> = {
+    [MODERN_TLS13_PROFILE.name]: MODERN_TLS13_PROFILE,
+    [COMPATIBILITY_PROFILE.name]: COMPATIBILITY_PROFILE,
+};
+
+/** Look up a profile by name, or undefined if unknown. */
+export function getProfile(name: string): TlsProfile | undefined {
+    return PROFILES[name];
+}
+
+/** Resolve a profile and fill in the serverName (which is connection-specific). */
+export function resolveProfile(name: string, serverName: string): ClientHelloConfig {
+    const profile = PROFILES[name];
+    if (!profile) {
+        throw new Error(`unknown TLS profile: ${name}`);
+    }
+    return { ...profile.config, serverName };
+}
+
