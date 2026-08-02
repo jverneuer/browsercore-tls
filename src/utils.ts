@@ -1,5 +1,5 @@
 /**
- * Small shared helpers for @network/tls.
+ * Small shared helpers for @browsercore/tls.
  *
  * Kept dependency-free so every package can copy the pattern without pulling in
  * cross-package imports.

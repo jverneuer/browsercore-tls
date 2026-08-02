@@ -1,13 +1,13 @@
 /**
- * @network/tls — public entry point.
+ * @browsercore/tls — public entry point.
  *
  * Establishes a TLS 1.3 (with 1.2 fallback) connection over an existing
  * byte-stream transport. Wires together the record layer, handshake state
- * machine, key schedule, and certificate validation — consuming @network/transport
- * and @network/crypto, never node:crypto directly.
+ * machine, key schedule, and certificate validation — consuming @browsercore/transport
+ * and @browsercore/crypto, never node:crypto directly.
  */
 
-import type { Transport } from "@network/transport";
+import type { Transport } from "@browsercore/transport";
 import type {
     ApplicationTrafficSecrets,
     CloseReason,
@@ -50,10 +50,10 @@ const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
 export async function connectTls(options: TlsOptions): Promise<TlsConnection> {
     // PLAN: implement the full handshake:
     //   1. Generate key shares for each group in options.profile.keyShareGroups
-    //      via @network/crypto -> KeyPair[].
+    //      via @browsercore/crypto -> KeyPair[].
     //   2. buildClientHello(options.profile, keyPairs) -> write handshake record.
     //   3. Read ServerHello record -> parseServerHello.
-    //   4. (EC)DHE key exchange via @network/crypto -> sharedSecret.
+    //   4. (EC)DHE key exchange via @browsercore/crypto -> sharedSecret.
     //   5. deriveHandshakeSecrets / deriveApplicationSecrets.
     //   6. Read + decrypt EncryptedExtensions, Certificate, CertificateVerify, Finished.
     //   7. verifyChain against trust anchors + serverName.
@@ -120,9 +120,9 @@ export class TlsConnectionImpl implements TlsConnection {
     }
 }
 
-/** Generate key shares for the requested groups (delegates to @network/crypto). */
+/** Generate key shares for the requested groups (delegates to @browsercore/crypto). */
 export async function generateKeyShares(groups: readonly string[]): Promise<KeyPair[]> {
-    // PLAN: for each group call @network/crypto generateKeyPair(group).
+    // PLAN: for each group call @browsercore/crypto generateKeyPair(group).
     void groups;
     throw new Error("not implemented — see PLAN.md");
 }

@@ -1,8 +1,8 @@
 /**
- * @network/tls — public API surface.
+ * @browsercore/tls — public API surface.
  *
  * A TLS 1.3 (and 1.2 fallback) client implemented entirely in TypeScript.
- * Depends on @network/transport and @network/crypto — never node:crypto directly.
+ * Depends on @browsercore/transport and @browsercore/crypto — never node:crypto directly.
  * Higher layers (http1, http2, fetch) compose exclusively through these exports.
  */
 

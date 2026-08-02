@@ -1,4 +1,4 @@
-# @network/tls
+# @browsercore/tls
 
 A TLS 1.3 (and 1.2 fallback) client implemented entirely in TypeScript.
 
@@ -6,7 +6,7 @@ A TLS 1.3 (and 1.2 fallback) client implemented entirely in TypeScript.
 
 Owns the full TLS handshake, record layer, key schedule, and X.509 certificate
 validation. Provides an encrypted byte stream over an existing
-`@network/transport` connection so higher layers never touch plaintext on the wire.
+`@browsercore/transport` connection so higher layers never touch plaintext on the wire.
 
 ## What it does NOT know about
 
@@ -14,15 +14,15 @@ validation. Provides an encrypted byte stream over an existing
 - Browser fingerprints
 - Cookies
 
-It knows about byte streams (`@network/transport`) and cryptographic primitives
-(`@network/crypto`). It **never** imports `node:crypto` directly — that boundary
-is `@network/crypto`'s job, which keeps the crypto backend replaceable.
+It knows about byte streams (`@browsercore/transport`) and cryptographic primitives
+(`@browsercore/crypto`). It **never** imports `node:crypto` directly — that boundary
+is `@browsercore/crypto`'s job, which keeps the crypto backend replaceable.
 
 ## Public API
 
 ```ts
-import { connect } from "@network/transport";
-import { connectTls, resolveProfile, TlsHandshakeError } from "@network/tls";
+import { connect } from "@browsercore/transport";
+import { connectTls, resolveProfile, TlsHandshakeError } from "@browsercore/tls";
 
 const transport = await connect({ host: "example.com", port: 443 });
 
@@ -49,7 +49,7 @@ await tls.close();
 | `CloseReason` | discriminated union | Why a TLS connection closed |
 | `ProtocolVersion` | discriminated union | `TLS 1.2` / `TLS 1.3` with wire codes |
 | `CipherSuite` | string-literal union | Negotiated AEAD + hash |
-| `ClientHelloConfig` | interface | ClientHello configuration (placeholder for @network/profiles) |
+| `ClientHelloConfig` | interface | ClientHello configuration (placeholder for @browsercore/profiles) |
 | `TlsError` | class | Base typed error |
 | `TlsHandshakeError` | class | Handshake failure at a specific phase |
 | `TlsDecryptError` | class | Record decryption / auth failure |
@@ -58,8 +58,8 @@ await tls.close();
 ## Dependency graph
 
 ```
-@network/tls
-  └─ @network/transport  @network/crypto
+@browsercore/tls
+  └─ @browsercore/transport  @browsercore/crypto
 ```
 
-No other `@network/*` packages are imported.
+No other `@browsercore/*` packages are imported.

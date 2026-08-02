@@ -1,8 +1,8 @@
 /**
- * Tests for @network/tls certificate handling (Step 4).
+ * Tests for @browsercore/tls certificate handling (Step 4).
  *
  * The test file uses node:crypto to generate a real self-signed ECDSA P-256
- * certificate — that's fine: the production code routes through @network/crypto
+ * certificate — that's fine: the production code routes through @browsercore/crypto
  * and never imports node:crypto. Here we exercise parseCertificate,
  * validateHostname, verifyChain, and pemToDer against a real DER cert.
  */

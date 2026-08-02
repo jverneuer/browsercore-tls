@@ -1,12 +1,12 @@
 /**
- * Domain types for @network/tls.
+ * Domain types for @browsercore/tls.
  *
  * This package owns TLS 1.3 (and 1.2 fallback) protocol logic. It knows about
- * byte streams (@network/transport) and cryptographic primitives (@network/crypto)
- * but NEVER imports node:crypto directly — that boundary is @network/crypto's job.
+ * byte streams (@browsercore/transport) and cryptographic primitives (@browsercore/crypto)
+ * but NEVER imports node:crypto directly — that boundary is @browsercore/crypto's job.
  */
 
-import type { Transport } from "@network/transport";
+import type { Transport } from "@browsercore/transport";
 import type { TlsError } from "./errors.js";
 
 /** Branded TLS session identifier. */
@@ -79,7 +79,7 @@ export type TlsState =
     }
     | { readonly state: "closed"; readonly reason: CloseReason };
 
-/** Configuration for building a ClientHello. Placeholder until @network/profiles. */
+/** Configuration for building a ClientHello. Placeholder until @browsercore/profiles. */
 export interface ClientHelloConfig {
     /** Ordered list of cipher suites the client advertises (most-preferred first). */
     readonly cipherSuites: readonly CipherSuite[];
@@ -101,7 +101,7 @@ export interface TlsOptions {
     readonly transport: Transport;
     /** SNI server name. Defaults to host if omitted. */
     readonly serverName: string;
-    /** ClientHello configuration (placeholder until @network/profiles is built). */
+    /** ClientHello configuration (placeholder until @browsercore/profiles is built). */
     readonly profile: ClientHelloConfig;
     /** ALPN protocols to offer. Overrides profile.alpnProtocols if provided. */
     readonly alpnProtocols?: readonly string[];
@@ -113,7 +113,7 @@ export interface TlsOptions {
 
 /**
  * An asymmetric key pair. Bytes are algorithm-specific; this package never
- * generates them — it asks @network/crypto.
+ * generates them — it asks @browsercore/crypto.
  */
 export interface KeyPair {
     readonly algorithm: "x25519" | "secp256r1" | "secp384r1";

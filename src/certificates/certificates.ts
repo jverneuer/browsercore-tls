@@ -3,11 +3,11 @@
  *
  * Parses DER-encoded certificates, validates hostnames against SAN/CN, and
  * verifies certificate chains against trust anchors. The cryptographic
- * signature verification itself is delegated to @network/crypto — this module
+ * signature verification itself is delegated to @browsercore/crypto — this module
  * owns ASN.1 layout and validation policy only.
  */
 
-import { crypto } from "@network/crypto";
+import { crypto } from "@browsercore/crypto";
 import type { SignatureScheme } from "../types.js";
 import { TlsHandshakeError } from "../errors.js";
 
@@ -672,7 +672,7 @@ function matchDnsName(pattern: string, hostname: string): boolean {
  * Verify a certificate chain: each cert is signed by the next, the root is in
  * the trust anchors, and the leaf is valid for the hostname and not expired.
  *
- * Signature verification is delegated to @network/crypto. Throws
+ * Signature verification is delegated to @browsercore/crypto. Throws
  * {@link TlsHandshakeError} with phase "certificate" on any failure.
  */
 export async function verifyChain(

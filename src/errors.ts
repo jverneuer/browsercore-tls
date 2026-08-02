@@ -1,5 +1,5 @@
 /**
- * Typed errors for @network/tls.
+ * Typed errors for @browsercore/tls.
  *
  * Errors are part of the API — every failure mode is an explicit type so callers
  * can match on `kind` instead of parsing messages.

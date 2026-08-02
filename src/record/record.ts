@@ -3,10 +3,10 @@
  *
  * Frames all higher-layer protocol messages (handshake, alert, change_cipher_spec,
  * application_data) into typed records. Encryption/decryption of the record
- * payload is delegated to @network/crypto — this module owns framing only.
+ * payload is delegated to @browsercore/crypto — this module owns framing only.
  */
 
-import { crypto } from "@network/crypto";
+import { crypto } from "@browsercore/crypto";
 import type { AeadAlgorithm, CipherSuite } from "../types.js";
 import { TlsDecryptError } from "../errors.js";
 import { assertNever } from "../utils.js";
@@ -107,7 +107,7 @@ export function serializeRecordHeader(
  * The TLS 1.3 record layer appends the inner content type to `plaintext` BEFORE
  * calling this function and uses the 5-byte record header as the AEAD
  * `additionalData`; this function is the pure AEAD step that delegates to
- * @network/crypto. The outer record type (APPLICATION_DATA in TLS 1.3) is the
+ * @browsercore/crypto. The outer record type (APPLICATION_DATA in TLS 1.3) is the
  * caller's responsibility.
  *
  * @param plaintext        Data to encrypt (caller has already appended the inner content type).
@@ -140,7 +140,7 @@ export function encryptRecord(
  *
  * The TLS 1.3 record layer strips the trailing inner content type byte from the
  * returned plaintext and verifies it; this function is the pure AEAD step that
- * delegates to @network/crypto, throwing {@link TlsDecryptError} on auth failure.
+ * delegates to @browsercore/crypto, throwing {@link TlsDecryptError} on auth failure.
  *
  * @param ciphertext       Ciphertext with the 16-byte authentication tag appended.
  * @param key              AEAD key for this direction.
@@ -167,7 +167,7 @@ export function decryptRecord(
                 return assertNever(algorithm);
         }
     } catch (cause) {
-        // @network/crypto throws its own DecryptError on auth failure; translate it
+        // @browsercore/crypto throws its own DecryptError on auth failure; translate it
         // into the TLS-layer typed error so callers see a consistent error type.
         // Under exactOptionalPropertyTypes, `cause` must be `Error` (never undefined)
         // when passed in the options object — omit the key entirely otherwise.

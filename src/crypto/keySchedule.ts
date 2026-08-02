@@ -3,16 +3,16 @@
  *
  * Derives all handshake and application traffic secrets from the (EC)DHE shared
  * secret and the running handshake transcript. Every HMAC/HKDF/hash operation is
- * delegated to @network/crypto — this module owns the schedule structure only.
+ * delegated to @browsercore/crypto — this module owns the schedule structure only.
  *
  * HKDF-Extract and HKDF-Expand are implemented locally on top of the HMAC
- * primitive exposed by @network/crypto: the provider's combined `hkdf` helper
+ * primitive exposed by @browsercore/crypto: the provider's combined `hkdf` helper
  * always performs extract+expand in one call, but the TLS 1.3 schedule needs
  * the two steps independently (the extract output feeds the next stage's salt).
  */
 
-import { crypto, SHA_256, SHA_384 } from "@network/crypto";
-import type { HashId } from "@network/crypto";
+import { crypto, SHA_256, SHA_384 } from "@browsercore/crypto";
+import type { HashId } from "@browsercore/crypto";
 import type {
     ApplicationTrafficSecrets,
     CipherSuite,
@@ -73,7 +73,7 @@ function hkdfExtract(hash: HashId, salt: Uint8Array, ikm: Uint8Array): Uint8Arra
 
 /**
  * HKDF-Expand(PRK, info, length) per RFC 5869 §2.3, implemented on top of HMAC
- * because @network/crypto exposes only the combined extract+expand helper.
+ * because @browsercore/crypto exposes only the combined extract+expand helper.
  */
 function hkdfExpand(hash: HashId, prk: Uint8Array, info: Uint8Array, length: number): Uint8Array {
     const hashLen = hashLength(hash);
@@ -141,7 +141,7 @@ function deriveTrafficSecrets(
  * Derive the handshake traffic secrets from the (EC)DHE shared secret and the
  * ClientHello..ServerHello transcript. Returns secrets for both directions.
  *
- * @param sharedSecret    (EC)DHE shared secret from @network/crypto.
+ * @param sharedSecret    (EC)DHE shared secret from @browsercore/crypto.
  * @param helloTranscript Transcript hash of ClientHello..ServerHello.
  * @param cipherSuite     Negotiated cipher suite (selects hash + AEAD sizes).
  */

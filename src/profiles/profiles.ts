@@ -2,9 +2,9 @@
  * ClientHello configuration profiles (placeholder).
  *
  * This module defines the local `TlsProfile` shape and a couple of example
- * configurations. Once @network/profiles is built, it becomes the single source
+ * configurations. Once @browsercore/profiles is built, it becomes the single source
  * of truth and this module will re-export from there. Keeping the shape here
- * avoids a circular dependency while @network/profiles is not yet ready.
+ * avoids a circular dependency while @browsercore/profiles is not yet ready.
  */
 
 import type { ClientHelloConfig } from "../types.js";

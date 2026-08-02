@@ -1,5 +1,5 @@
 /**
- * Tests for @network/tls.
+ * Tests for @browsercore/tls.
  *
  * Mirrors the transport test style: vitest, real assertions, no mocks for the
  * pure functions (record header parse/serialize). Handshake/crypto parts are
