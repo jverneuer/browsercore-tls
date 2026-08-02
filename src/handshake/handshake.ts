@@ -19,9 +19,12 @@ import { TlsHandshakeError } from "../errors.js";
 import { assertNever } from "../utils.js";
 import {
     ExtensionType,
+    findExtension,
     namedGroupToWire,
+    parseExtensions,
     signatureSchemeToWire,
 } from "../extensions/extensions.js";
+import { assertCipherSuiteOffered, assertVersionSupported } from "../crypto/keySchedule.js";
 
 /** TLS handshake message types, per RFC 8446 §4. */
 export const HandshakeType = {
@@ -57,11 +60,20 @@ export interface ClientHello {
 
 /** A parsed ServerHello — the first handshake message the server sends. */
 export interface ServerHello {
+    /**
+     * Legacy protocol version (always 0x0303 for TLS 1.3, for middlebox
+     * compatibility). The real negotiated version is {@link selectedVersion}.
+     */
     readonly protocolVersion: number;
     readonly random: Uint8Array;
     readonly sessionId: Uint8Array;
     readonly cipherSuite: CipherSuite;
     readonly compressionMethod: number;
+    /**
+     * The protocol version the server actually negotiated, extracted from the
+     * supported_versions extension. This is the authoritative version.
+     */
+    readonly selectedVersion: ProtocolVersion;
     readonly extensions: Uint8Array;
 }
 
@@ -318,10 +330,43 @@ function encodeAlpn(protocols: readonly string[]): Uint8Array {
 }
 
 /**
- * Parse a ServerHello from a handshake message body (without the 4-byte handshake header).
- * Throws {@link TlsHandshakeError} with phase "server_hello" on malformed input.
+ * What the client offered in its ClientHello, needed so the ServerHello can be
+ * validated against it. Only the fields that {@link parseServerHello} checks are
+ * required — everything else is irrelevant to ServerHello parsing.
  */
-export function parseServerHello(buf: Uint8Array): ServerHello {
+export interface ServerHelloValidation {
+    /** Cipher suites the client advertised, most-preferred first. */
+    readonly cipherSuites: readonly CipherSuite[];
+    /** Protocol versions the client advertised via supported_versions. */
+    readonly supportedVersions: readonly ProtocolVersion[];
+}
+
+/**
+ * Map a 16-bit wire version to the branded {@link ProtocolVersion} from the
+ * offered list. Throws if the server selected a version we did not offer.
+ */
+function selectVersion(wire: number, offered: readonly ProtocolVersion[]): ProtocolVersion {
+    for (const version of offered) {
+        if (version.wire === wire) {
+            return version;
+        }
+    }
+    throw new TlsHandshakeError("server_hello", {
+        cause: new Error(`server negotiated version we did not offer: 0x${wire.toString(16)}`),
+    });
+}
+
+/**
+ * Parse a ServerHello from a handshake message body (without the 4-byte handshake header).
+ *
+ * Validates that the selected cipher suite was actually offered and that the
+ * negotiated protocol version (from the supported_versions extension) is one we
+ * support — failing fast makes an unacceptable negotiation unrepresentable.
+ *
+ * Throws {@link TlsHandshakeError} with phase "server_hello" on malformed input
+ * or a failed validation.
+ */
+export function parseServerHello(buf: Uint8Array, offered: ServerHelloValidation): ServerHello {
     let o = 0;
     const expect = (n: number): void => {
         if (o + n > buf.length) {
@@ -351,12 +396,46 @@ export function parseServerHello(buf: Uint8Array): ServerHello {
         });
     }
 
+    // The server MUST negotiate a cipher suite we offered.
+    assertCipherSuiteOffered(cipherSuite, offered.cipherSuites);
+
+    // Capture the offset before reading extensions_len so the slice retains the
+    // 2-byte length prefix. parseExtensions (used both here for the
+    // supported_versions extension and later by the key-share extraction in
+    // _computeSharedSecret) requires its input to be the length-prefixed block.
+    const extensionsStart = o;
     const extensionsLen = (buf[o++]! << 8) | buf[o++]!;
     expect(extensionsLen);
-    const extensions = buf.subarray(o, o + extensionsLen);
+    const extensions = buf.subarray(extensionsStart, o + extensionsLen);
+
+    const selectedVersion = negotiateVersion(extensions, offered.supportedVersions);
 
     void protocolVersion;
-    return { protocolVersion, random, sessionId, cipherSuite, compressionMethod, extensions };
+    return { protocolVersion, random, sessionId, cipherSuite, compressionMethod, selectedVersion, extensions };
+}
+
+/**
+ * Extract the version the server negotiated from the supported_versions
+ * extension (RFC 8446 §4.2.1) and validate it. The server's extension body is a
+ * single uint16 — the one version it selected from our offered list.
+ */
+function negotiateVersion(extensionsRaw: Uint8Array, offered: readonly ProtocolVersion[]): ProtocolVersion {
+    const extensions = parseExtensions(extensionsRaw);
+    const sv = findExtension(extensions, ExtensionType.SUPPORTED_VERSIONS);
+    if (sv === undefined) {
+        throw new TlsHandshakeError("server_hello", {
+            cause: new Error("ServerHello missing required supported_versions extension"),
+        });
+    }
+    if (sv.data.length !== 2) {
+        throw new TlsHandshakeError("server_hello", {
+            cause: new Error(`supported_versions extension has unexpected length ${sv.data.length}`),
+        });
+    }
+    const wire = (sv.data[0]! << 8) | sv.data[1]!;
+    const selected = selectVersion(wire, offered);
+    assertVersionSupported(selected);
+    return selected;
 }
 
 /**

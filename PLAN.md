@@ -24,11 +24,13 @@ Implement `buildClientHello` and the helpers it needs:
 
 Tests: build a ClientHello, parse the handshake body back, assert all fields match.
 
-## Step 3 — ServerHello parser
+## Step 3 — ServerHello parser (PARTIAL)
 
 Implement `parseServerHello` in `src/handshake/handshake.ts`. Validate the selected
 cipher suite is one we offered and the version is supported, throwing
 `TlsHandshakeError("server_hello")` otherwise.
+
+— cipher-offered/version validation not wired into parser.
 
 Tests: parse a hand-crafted ServerHello; assert rejection on an unoffered cipher suite.
 
@@ -55,9 +57,11 @@ Implement the TLS 1.3 key schedule in `src/crypto/keySchedule.ts`:
 
 Tests: verify against the RFC 8446 test vectors (no network needed).
 
-## Step 6 — Handshake state machine wiring
+## Step 6 — Handshake state machine wiring (NOT STARTED)
 
 Implement `advanceHandshake` and the full `connectTls` flow:
+
+— connectTls/TlsConnectionImpl are stubs.
 
 1. Drive `TlsState` through `connecting → handshaking → open → closed`.
 2. Wire the record layer, handshake messages, and key schedule together.
@@ -74,17 +78,21 @@ the TLS 1.2 CBC/AEAD record formats.
 
 Tests: encrypt → decrypt round-trip; assert tampering fails authentication.
 
-## Step 8 — Full TLS 1.3 handshake against a test server
+## Step 8 — Full TLS 1.3 handshake against a test server (NOT STARTED)
 
 Integration test: spin up a TLS 1.3 server (e.g. `openssl s_server` or a Node `tls`
 server with minVersion TLS 1.3) over a loopback `@browsercore/transport` and run a full
 handshake + application-data exchange.
 
-## Step 9 — TLS 1.2 fallback
+— connectTls/TlsConnectionImpl are stubs.
+
+## Step 9 — TLS 1.2 fallback (NOT STARTED)
 
 When the server does not support TLS 1.3 (supported_versions absent or only 1.2),
 negotiate TLS 1.2 using the same record layer with the TLS 1.2 key schedule and
 CBC/AEAD record protection.
+
+— connectTls/TlsConnectionImpl are stubs.
 
 ## Step 10 — ALPN + SNI
 

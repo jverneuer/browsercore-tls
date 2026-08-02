@@ -48,14 +48,24 @@ export {
 export type { ContentType as TlsContentType, RecordHeader, TlsRecord } from "./record/record.js";
 
 export { HandshakeType, buildClientHello, parseServerHello } from "./handshake/handshake.js";
-export type { ClientHello, ServerHello, HandshakeType as TlsHandshakeType } from "./handshake/handshake.js";
+export type {
+    ClientHello,
+    ServerHello,
+    ServerHelloValidation,
+    HandshakeType as TlsHandshakeType,
+} from "./handshake/handshake.js";
 
-export { ExtensionType, parseExtensions, findExtension } from "./extensions/extensions.js";
+export { ExtensionType, parseExtensions, findExtension, wireToNamedGroup } from "./extensions/extensions.js";
 export type { TlsExtension } from "./extensions/extensions.js";
 
 export { parseCertificate, validateHostname, verifyChain, pemToDer } from "./certificates/certificates.js";
 export type { Certificate, CertificateChain, TrustAnchor } from "./certificates/certificates.js";
 
-export { hkdfExpandLabel, deriveHandshakeSecrets, deriveApplicationSecrets } from "./crypto/keySchedule.js";
+export {
+    hkdfExpandLabel,
+    deriveHandshakeSecrets,
+    deriveHandshakeTrafficSecrets,
+    deriveApplicationSecrets,
+} from "./crypto/keySchedule.js";
 
 export { assertNever } from "./utils.js";

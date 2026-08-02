@@ -126,8 +126,12 @@ export function hkdfExpandLabel(
 
 /**
  * Derive a single direction's traffic secrets (key + iv) from a traffic secret.
+ *
+ * Exposed (not just internal) so the handshake layer can derive record
+ * protection secrets directly from the raw handshake traffic secrets it needs
+ * for the Finished verify-data computation.
  */
-function deriveTrafficSecrets(
+export function deriveTrafficSecrets(
     trafficSecret: Uint8Array,
     cipherSuite: CipherSuite,
     hash: HashId,
@@ -138,20 +142,27 @@ function deriveTrafficSecrets(
 }
 
 /**
- * Derive the handshake traffic secrets from the (EC)DHE shared secret and the
- * ClientHello..ServerHello transcript. Returns secrets for both directions.
+ * Derive the raw handshake traffic secrets and master secret from the (EC)DHE
+ * shared secret and the ClientHello..ServerHello transcript.
+ *
+ * The raw traffic secrets (one per direction) are the `*-handshake-traffic-
+ * secret` values from RFC 8446 §7.1. They are needed to compute the Finished
+ * `finished_key` (HKDF-Expand-Label(traffic_secret, "finished", "", Hash.length))
+ * and must be retained by the handshake driver — they are NOT the same as the
+ * record-protection TrafficSecrets returned by {@link deriveHandshakeSecrets}.
  *
  * @param sharedSecret    (EC)DHE shared secret from @browsercore/crypto.
  * @param helloTranscript Transcript hash of ClientHello..ServerHello.
  * @param cipherSuite     Negotiated cipher suite (selects hash + AEAD sizes).
  */
-export function deriveHandshakeSecrets(
+export function deriveHandshakeTrafficSecrets(
     sharedSecret: Uint8Array,
     helloTranscript: Uint8Array,
     cipherSuite: CipherSuite,
 ): {
     masterSecret: Uint8Array;
-    traffic: ApplicationTrafficSecrets;
+    clientTrafficSecret: Uint8Array;
+    serverTrafficSecret: Uint8Array;
 } {
     const hash = cipherSuiteToHash(cipherSuite);
     const hashLen = hashLength(hash);
@@ -167,18 +178,47 @@ export function deriveHandshakeSecrets(
     const handshakeSecret = hkdfExtract(hash, derived, sharedSecret);
 
     // client/server handshake traffic secrets.
-    const clientHsTraffic = hkdfExpandLabel(handshakeSecret, "c hs traffic", helloTranscript, hashLen, hash);
-    const serverHsTraffic = hkdfExpandLabel(handshakeSecret, "s hs traffic", helloTranscript, hashLen, hash);
+    const clientTrafficSecret = hkdfExpandLabel(handshakeSecret, "c hs traffic", helloTranscript, hashLen, hash);
+    const serverTrafficSecret = hkdfExpandLabel(handshakeSecret, "s hs traffic", helloTranscript, hashLen, hash);
 
     // master_secret = HKDF-Extract(Derive-Secret(handshake_secret, "derived", ""), 0)
     const masterDerived = hkdfExpandLabel(handshakeSecret, "derived", new Uint8Array(0), hashLen, hash);
     const masterSecret = hkdfExtract(hash, masterDerived, zeros);
 
+    return { masterSecret, clientTrafficSecret, serverTrafficSecret };
+}
+
+/**
+ * Derive the handshake record-protection secrets (key + iv per direction) from
+ * the (EC)DHE shared secret and the ClientHello..ServerHello transcript.
+ *
+ * This is the record-layer view of {@link deriveHandshakeTrafficSecrets}: it
+ * returns TrafficSecrets ready to pass to the record encrypt/decrypt functions.
+ *
+ * @param sharedSecret    (EC)DHE shared secret from @browsercore/crypto.
+ * @param helloTranscript Transcript hash of ClientHello..ServerHello.
+ * @param cipherSuite     Negotiated cipher suite (selects hash + AEAD sizes).
+ */
+export function deriveHandshakeSecrets(
+    sharedSecret: Uint8Array,
+    helloTranscript: Uint8Array,
+    cipherSuite: CipherSuite,
+): {
+    masterSecret: Uint8Array;
+    traffic: ApplicationTrafficSecrets;
+} {
+    const hash = cipherSuiteToHash(cipherSuite);
+    const { masterSecret, clientTrafficSecret, serverTrafficSecret } = deriveHandshakeTrafficSecrets(
+        sharedSecret,
+        helloTranscript,
+        cipherSuite,
+    );
+
     return {
         masterSecret,
         traffic: {
-            client: deriveTrafficSecrets(clientHsTraffic, cipherSuite, hash),
-            server: deriveTrafficSecrets(serverHsTraffic, cipherSuite, hash),
+            client: deriveTrafficSecrets(clientTrafficSecret, cipherSuite, hash),
+            server: deriveTrafficSecrets(serverTrafficSecret, cipherSuite, hash),
         },
     };
 }

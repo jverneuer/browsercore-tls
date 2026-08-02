@@ -184,3 +184,21 @@ export function namedGroupToWire(group: NamedGroup): number {
     }
 }
 
+/** Invert {@link namedGroupToWire}; throws {@link TlsHandshakeError} on unknown values. */
+export function wireToNamedGroup(wire: number): NamedGroup {
+    switch (wire) {
+        case 0x0017:
+            return "secp256r1";
+        case 0x0018:
+            return "secp384r1";
+        case 0x001d:
+            return "x25519";
+        case 0x001e:
+            return "x448";
+        default:
+            throw new TlsHandshakeError("server_hello", {
+                cause: new Error(`unsupported named group wire value: 0x${wire.toString(16)}`),
+            });
+    }
+}
+
