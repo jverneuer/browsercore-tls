@@ -2,9 +2,7 @@
  * Tests for @browsercore/tls extensions (RFC 8446 §4.2, RFC 6066).
  *
  * Covers the parser (happy path + every malformed-input branch), the wire
- * encoders/decoders for signature schemes and named groups, findExtension, and
- * the five build* stubs (which throw "not implemented" — their throw statements
- * are real code and must be covered).
+ * encoders/decoders for signature schemes and named groups, and findExtension.
  */
 
 import { describe, it, expect } from "vitest";
@@ -15,15 +13,9 @@ import {
     signatureSchemeToWire,
     namedGroupToWire,
     wireToNamedGroup,
-    buildServerNameList,
-    buildSupportedVersions,
-    buildKeyShare,
-    buildSignatureAlgorithms,
-    buildAlpn,
 } from "../src/extensions/extensions.js";
 import { TlsHandshakeError } from "../src/errors.js";
-import type { NamedGroup, ProtocolVersion, SignatureScheme } from "../src/types.js";
-import { TLS_1_3 } from "../src/types.js";
+import type { NamedGroup, SignatureScheme } from "../src/types.js";
 
 /** Serialize one extension: type(2) || data_len(2) || data. */
 function ext(type: ExtensionType, data: Uint8Array): Uint8Array {
@@ -179,24 +171,3 @@ describe("wireToNamedGroup", () => {
     });
 });
 
-describe("build* stubs (not yet implemented)", () => {
-    it("buildServerNameList throws", () => {
-        expect(() => buildServerNameList("example.com")).toThrow(/not implemented/);
-    });
-
-    it("buildSupportedVersions throws", () => {
-        expect(() => buildSupportedVersions([TLS_1_3])).toThrow(/not implemented/);
-    });
-
-    it("buildKeyShare throws", () => {
-        expect(() => buildKeyShare([{ group: "x25519", keyExchange: new Uint8Array(32) }])).toThrow(/not implemented/);
-    });
-
-    it("buildSignatureAlgorithms throws", () => {
-        expect(() => buildSignatureAlgorithms(["ecdsa_secp256r1_sha256"])).toThrow(/not implemented/);
-    });
-
-    it("buildAlpn throws", () => {
-        expect(() => buildAlpn(["h2", "http/1.1"])).toThrow(/not implemented/);
-    });
-});

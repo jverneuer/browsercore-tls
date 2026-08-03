@@ -6,7 +6,7 @@
  */
 
 import type { NamedGroup, ProtocolVersion, SignatureScheme } from "../types.js";
-import { NotImplementedError, TlsHandshakeError } from "../errors.js";
+import { TlsHandshakeError } from "../errors.js";
 import { assertNever } from "../utils.js";
 
 /** TLS extension types, per IANA / RFC 8446. */
@@ -55,54 +55,6 @@ export interface KeyShareEntry {
 /** Signature Algorithms (RFC 8446 §4.2.3). */
 export interface SignatureAlgorithms {
     readonly algorithms: readonly SignatureScheme[];
-}
-
-/**
- * Build a Server Name Indication extension body from a hostname.
- * Encodes a single host_name (name_type=0) entry.
- */
-export function buildServerNameList(serverName: string): TlsExtension {
-    // PLAN: encode HostName entry: name_type(1)=0, length-prefixed host_name (ASCII/UTF-8).
-    void serverName;
-    throw new NotImplementedError("buildServerNameList (SNI server_name_list)");
-}
-
-/**
- * Build a Supported Versions extension body for the client's ClientHello.
- * Lists the protocol versions the client supports, most-preferred first.
- */
-export function buildSupportedVersions(versions: readonly ProtocolVersion[]): TlsExtension {
-    // PLAN: encode ProtocolVersions vector: length-prefixed list of uint16 wire versions.
-    void versions;
-    throw new NotImplementedError("buildSupportedVersions (supported_versions)");
-}
-
-/**
- * Build a Key Share extension body from pre-generated key pairs.
- * One KeyShareEntry per group, key_exchange length-prefixed.
- */
-export function buildKeyShare(keyShares: readonly KeyShareEntry[]): TlsExtension {
-    // PLAN: encode KeyShareEntry list: group(2) || key_exchange_length(2) || key_exchange.
-    void keyShares;
-    throw new NotImplementedError("buildKeyShare (key_share client_shares)");
-}
-
-/**
- * Build a Signature Algorithms extension body.
- */
-export function buildSignatureAlgorithms(algorithms: readonly SignatureScheme[]): TlsExtension {
-    // PLAN: encode SignatureScheme list as length-prefixed uint16 values (iana -> wire).
-    void algorithms;
-    throw new NotImplementedError("buildSignatureAlgorithms (signature_algorithms)");
-}
-
-/**
- * Build an ALPN extension body.
- */
-export function buildAlpn(protocols: readonly string[]): TlsExtension {
-    // PLAN: encode ProtocolNameList: length-prefixed list of length-prefixed UTF-8 names.
-    void protocols;
-    throw new NotImplementedError("buildAlpn (application_layer_protocol_negotiation)");
 }
 
 /**
