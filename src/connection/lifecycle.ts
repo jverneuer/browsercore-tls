@@ -1,0 +1,95 @@
+/**
+ * Connection lifecycle: timeouts, alerts, state transitions, error emission.
+ *
+ * The bookkeeping around a connection's lifetime — racing the handshake against
+ * a timeout, translating a received alert into a typed error, moving between
+ * lifecycle states, and notifying observers. Kept as thin functions over
+ * explicit state so the connection class stays a coordinator rather than owning
+ * this plumbing.
+ */
+
+import type { CloseReason, TlsState } from "../types.js";
+import { TlsAlertError, TlsHandshakeError, type TlsError } from "../errors.js";
+import { ContentType } from "../record/record.js";
+
+/** Race `run` against a timeout, rejecting with a handshake error if it fires. */
+export async function withTimeout(ms: number, run: () => Promise<void>): Promise<void> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+            reject(new TlsHandshakeError("finished", {
+                cause: new Error(`handshake timed out after ${ms}ms`),
+            }));
+        }, ms);
+    });
+    try {
+        await Promise.race([run(), timeout]);
+    } finally {
+        if (timer !== undefined) {
+            clearTimeout(timer);
+        }
+    }
+}
+
+/** Handle a non-application record encountered while reading application data. */
+export function handlePostHandshakeRecord(innerType: ContentType, content: Uint8Array): void {
+    switch (innerType) {
+        case ContentType.ALERT:
+            handleAlert(content);
+            break;
+        case ContentType.HANDSHAKE:
+            // Post-handshake handshake (e.g. NewSessionTicket, KeyUpdate) — out of
+            // scope for the happy path; ignore but do not error.
+            break;
+        case ContentType.CHANGE_CIPHER_SPEC:
+        case ContentType.APPLICATION_DATA:
+            // Neither should appear here: application data is the only expected
+            // outer type, and TLS 1.3 has no change_cipher_spec. Reject typed.
+            throw new TlsHandshakeError("finished", {
+                cause: new Error(`unexpected post-handshake record type ${innerType}`),
+            });
+    }
+}
+
+/** Translate a received alert into a typed error and close the connection. */
+export function handleAlert(content: Uint8Array): { close: boolean; error?: TlsAlertError } {
+    if (content.length < 2) {
+        return { close: false, error: new TlsAlertError("fatal", 0, { cause: new Error("truncated alert record") }) };
+    }
+    // content.length >= 2 (checked above) guarantees both indices are in bounds,
+    // but noUncheckedIndexedAccess cannot prove it — read through locals.
+    const levelByte = content[0];
+    const description = content[1];
+    if (levelByte === undefined || description === undefined) {
+        return { close: false, error: new TlsAlertError("fatal", 0, { cause: new Error("truncated alert record") }) };
+    }
+    const level = levelByte === 0x02 ? "fatal" : "warning";
+    if (description === 0) {
+        // close_notify — graceful.
+        return { close: true };
+    }
+    return { close: false, error: new TlsAlertError(level, description) };
+}
+
+/** Throw unless the connection is open. */
+export function ensureOpen(state: TlsState): void {
+    if (state.state !== "open") {
+        throw new TlsHandshakeError("finished", {
+            cause: new Error(`connection not open (state: ${state.state})`),
+        });
+    }
+}
+
+/** Emit an error to all registered error listeners. */
+export function emitError(listeners: readonly ((error: TlsError) => void)[], error: TlsError): void {
+    for (const listener of listeners) {
+        listener(error);
+    }
+}
+
+/** Notify all close listeners. */
+export function notifyClose(listeners: readonly ((reason: CloseReason) => void)[], reason: CloseReason): void {
+    for (const listener of listeners) {
+        listener(reason);
+    }
+}

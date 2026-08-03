@@ -18,7 +18,7 @@ import type {
     ProtocolVersion,
     TrafficSecrets,
 } from "../types.js";
-import { TlsHandshakeError } from "../errors.js";
+import { TlsHandshakeError, TlsKeyScheduleError } from "../errors.js";
 import { assertNever } from "../utils.js";
 
 /** Map a cipher suite to its HKDF hash function (all TLS 1.3 suites use SHA-256/384). */
@@ -54,8 +54,8 @@ export function cipherSuiteIvLength(_cipherSuite: CipherSuite): number {
     return 12;
 }
 
-/** Hash output length for a given HKDF hash (bytes). */
-function hashLength(hash: HashId): number {
+/** Output length (bytes) of the hash used by a cipher suite. */
+export function hashLengthFor(hash: HashId): number {
     switch (hash) {
         case "SHA-256":
             return 32;
@@ -66,12 +66,19 @@ function hashLength(hash: HashId): number {
     }
 }
 
+/** Map a negotiated cipher suite to the hash function used for its transcript. */
+export function hashFor(cipherSuite: CipherSuite): HashId {
+    return cipherSuiteToHash(cipherSuite);
+}
+
 /**
  * HKDF-Extract(salt, Ikm) = HMAC-Hash(salt, Ikm), per RFC 5869 §2.3.
- * The output is exactly {@link hashLength}(hash) bytes.
+ * The output is exactly {@link hashLengthFor}(hash) bytes.
  */
 function hkdfExtract(hash: HashId, salt: Uint8Array, ikm: Uint8Array): Uint8Array {
-    return crypto.hmac(hash, salt, ikm) as Uint8Array;
+    // crypto.hmac is declared to return Uint8Array; the cast that used to live
+    // here was redundant.
+    return crypto.hmac(hash, salt, ikm);
 }
 
 /**
@@ -79,10 +86,10 @@ function hkdfExtract(hash: HashId, salt: Uint8Array, ikm: Uint8Array): Uint8Arra
  * because @browsercore/crypto exposes only the combined extract+expand helper.
  */
 function hkdfExpand(hash: HashId, prk: Uint8Array, info: Uint8Array, length: number): Uint8Array {
-    const hashLen = hashLength(hash);
+    const hashLen = hashLengthFor(hash);
     const n = Math.ceil(length / hashLen);
     if (n > 255) {
-        throw new Error(`HKDF-Expand length ${length} exceeds maximum for hash (255 * ${hashLen})`);
+        throw new TlsKeyScheduleError(hash, `HKDF-Expand length ${length} exceeds maximum for hash (255 * ${hashLen})`);
     }
     const okm = new Uint8Array(n * hashLen);
     let t: Uint8Array = new Uint8Array(0);
@@ -168,7 +175,7 @@ export function deriveHandshakeTrafficSecrets(
     serverTrafficSecret: Uint8Array;
 } {
     const hash = cipherSuiteToHash(cipherSuite);
-    const hashLen = hashLength(hash);
+    const hashLen = hashLengthFor(hash);
     const zeros = new Uint8Array(hashLen);
 
     // early_secret = HKDF-Extract(0, 0)
@@ -240,7 +247,7 @@ export function deriveApplicationSecrets(
     cipherSuite: CipherSuite,
 ): ApplicationTrafficSecrets {
     const hash = cipherSuiteToHash(cipherSuite);
-    const hashLen = hashLength(hash);
+    const hashLen = hashLengthFor(hash);
 
     const clientApTraffic = hkdfExpandLabel(masterSecret, "c ap traffic", handshakeTranscript, hashLen, hash);
     const serverApTraffic = hkdfExpandLabel(masterSecret, "s ap traffic", handshakeTranscript, hashLen, hash);
@@ -262,7 +269,7 @@ export function deriveApplicationSecrets(
  */
 export function updateTrafficSecrets(currentSecret: Uint8Array, cipherSuite: CipherSuite): TrafficSecrets {
     const hash = cipherSuiteToHash(cipherSuite);
-    const hashLen = hashLength(hash);
+    const hashLen = hashLengthFor(hash);
     const nextSecret = hkdfExpandLabel(currentSecret, "traffic upd", new Uint8Array(0), hashLen, hash);
     return deriveTrafficSecrets(nextSecret, cipherSuite, hash);
 }

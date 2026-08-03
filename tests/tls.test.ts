@@ -68,11 +68,12 @@ describe("record header", () => {
 });
 
 describe("cipher suite helpers", () => {
-    it("maps each TLS 1.3 cipher suite to its AEAD algorithm", () => {
+    it("maps each implemented TLS 1.3 cipher suite to its AEAD algorithm", () => {
         expect(cipherSuiteToAead("TLS_AES_128_GCM_SHA256")).toBe("AES-128-GCM");
         expect(cipherSuiteToAead("TLS_AES_256_GCM_SHA384")).toBe("AES-256-GCM");
         expect(cipherSuiteToAead("TLS_CHACHA20_POLY1305_SHA256")).toBe("CHACHA20-POLY1305");
-        expect(cipherSuiteToAead("TLS_AES_128_CCM_SHA256")).toBe("AES-128-GCM");
+        // TLS_AES_128_CCM_SHA256 has no backing primitive in @browsercore/crypto,
+        // so cipherSuiteToAead rejects it (see record.test.ts for that assertion).
     });
 });
 

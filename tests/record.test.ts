@@ -63,13 +63,19 @@ describe("cipherSuiteToAead", () => {
     it("maps every cipher suite to its AEAD algorithm", () => {
         const cases: ReadonlyArray<[CipherSuite, AeadAlgorithm]> = [
             ["TLS_AES_128_GCM_SHA256", "AES-128-GCM"],
-            ["TLS_AES_128_CCM_SHA256", "AES-128-GCM"],
             ["TLS_AES_256_GCM_SHA384", "AES-256-GCM"],
             ["TLS_CHACHA20_POLY1305_SHA256", "CHACHA20-POLY1305"],
         ];
         for (const [suite, expected] of cases) {
             expect(cipherSuiteToAead(suite)).toBe(expected);
         }
+    });
+
+    it("rejects the unimplemented AES-128-CCM suite instead of silently mapping it to GCM", () => {
+        // @browsercore/crypto exposes no AES-CCM primitive, so CCM is never offered.
+        // If it reached the AEAD mapper it must fail loudly rather than return
+        // AES-128-GCM (which would complete the handshake then fail every record).
+        expect(() => cipherSuiteToAead("TLS_AES_128_CCM_SHA256")).toThrow(/AES-128-CCM/);
     });
 });
 

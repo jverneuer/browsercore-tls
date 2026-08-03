@@ -19,3 +19,27 @@ export function assertNever(x: never): never {
 export function createId(prefix: string): string {
     return `${prefix}_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`;
 }
+
+/**
+ * Constant-time byte comparison. Length-equal only — it leaks whether the
+ * lengths match (an unavoidable side channel), but never the contents. Used
+ * where a naive `===` on SPKI bytes would let an attacker learn how many
+ * leading bytes match via timing.
+ */
+export function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
+    if (a.length !== b.length) {
+        return false;
+    }
+    let diff = 0;
+    for (let i = 0; i < a.length; i++) {
+        // Lengths are equal here (checked above), so both indices are in bounds —
+        // but noUncheckedIndexedAccess cannot prove it, so read through locals.
+        const ai = a[i];
+        const bi = b[i];
+        if (ai === undefined || bi === undefined) {
+            return false;
+        }
+        diff |= ai ^ bi;
+    }
+    return diff === 0;
+}

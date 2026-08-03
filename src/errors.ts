@@ -86,6 +86,68 @@ export class TlsAlertError extends Error {
     }
 }
 
+/**
+ * A code path that has not been implemented yet.
+ *
+ * Used by placeholder extension builders (and any future stubs) so the failure
+ * is a typed, identifiable error rather than a bare `Error`. The message keeps
+ * the "not implemented" phrase so existing `/not implemented/` assertions still
+ * match.
+ */
+export class NotImplementedError extends Error {
+    public readonly kind = "NotImplementedError" as const;
+    public readonly feature: string;
+    public override readonly cause: Error | undefined;
+
+    constructor(feature: string, options?: { cause?: Error }) {
+        super(`not implemented — ${feature} (see PLAN.md)`);
+        this.name = "NotImplementedError";
+        this.feature = feature;
+        this.cause = options?.cause;
+    }
+}
+
+/** A PEM block was missing the required BEGIN/END CERTIFICATE markers. */
+export class TlsPemError extends Error {
+    public readonly kind = "TlsPemError" as const;
+    public override readonly cause: Error | undefined;
+
+    constructor(message: string, options?: { cause?: Error }) {
+        super(message);
+        this.name = "TlsPemError";
+        this.cause = options?.cause;
+    }
+}
+
+/** A TLS key-schedule computation rejected its inputs (e.g. HKDF-Expand overflow). */
+export class TlsKeyScheduleError extends Error {
+    public readonly kind = "TlsKeyScheduleError" as const;
+    public readonly hash: string;
+    public override readonly cause: Error | undefined;
+
+    constructor(hash: string, message: string, options?: { cause?: Error }) {
+        super(message);
+        this.name = "TlsKeyScheduleError";
+        this.hash = hash;
+        this.cause = options?.cause;
+    }
+}
+
+/** A TLS profile name could not be resolved. */
+export class TlsProfileError extends Error {
+    public readonly kind = "TlsProfileError" as const;
+    /** The unresolved profile name. Named `profile` (not `name`) to avoid shadowing `Error.name`. */
+    public readonly profile: string;
+    public override readonly cause: Error | undefined;
+
+    constructor(profile: string, options?: { cause?: Error }) {
+        super(`unknown TLS profile: ${profile}`);
+        this.name = "TlsProfileError";
+        this.profile = profile;
+        this.cause = options?.cause;
+    }
+}
+
 /** Narrow a caught error to a typed TLS error, or wrap it in {@link TlsError}. */
 export function ensureTlsError(e: unknown): TlsError {
     if (e instanceof TlsError) {

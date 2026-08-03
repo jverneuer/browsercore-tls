@@ -6,7 +6,7 @@
  */
 
 import type { NamedGroup, ProtocolVersion, SignatureScheme } from "../types.js";
-import { TlsHandshakeError } from "../errors.js";
+import { NotImplementedError, TlsHandshakeError } from "../errors.js";
 import { assertNever } from "../utils.js";
 
 /** TLS extension types, per IANA / RFC 8446. */
@@ -64,7 +64,7 @@ export interface SignatureAlgorithms {
 export function buildServerNameList(serverName: string): TlsExtension {
     // PLAN: encode HostName entry: name_type(1)=0, length-prefixed host_name (ASCII/UTF-8).
     void serverName;
-    throw new Error("not implemented — see PLAN.md");
+    throw new NotImplementedError("buildServerNameList (SNI server_name_list)");
 }
 
 /**
@@ -74,7 +74,7 @@ export function buildServerNameList(serverName: string): TlsExtension {
 export function buildSupportedVersions(versions: readonly ProtocolVersion[]): TlsExtension {
     // PLAN: encode ProtocolVersions vector: length-prefixed list of uint16 wire versions.
     void versions;
-    throw new Error("not implemented — see PLAN.md");
+    throw new NotImplementedError("buildSupportedVersions (supported_versions)");
 }
 
 /**
@@ -84,7 +84,7 @@ export function buildSupportedVersions(versions: readonly ProtocolVersion[]): Tl
 export function buildKeyShare(keyShares: readonly KeyShareEntry[]): TlsExtension {
     // PLAN: encode KeyShareEntry list: group(2) || key_exchange_length(2) || key_exchange.
     void keyShares;
-    throw new Error("not implemented — see PLAN.md");
+    throw new NotImplementedError("buildKeyShare (key_share client_shares)");
 }
 
 /**
@@ -93,7 +93,7 @@ export function buildKeyShare(keyShares: readonly KeyShareEntry[]): TlsExtension
 export function buildSignatureAlgorithms(algorithms: readonly SignatureScheme[]): TlsExtension {
     // PLAN: encode SignatureScheme list as length-prefixed uint16 values (iana -> wire).
     void algorithms;
-    throw new Error("not implemented — see PLAN.md");
+    throw new NotImplementedError("buildSignatureAlgorithms (signature_algorithms)");
 }
 
 /**
@@ -102,7 +102,7 @@ export function buildSignatureAlgorithms(algorithms: readonly SignatureScheme[])
 export function buildAlpn(protocols: readonly string[]): TlsExtension {
     // PLAN: encode ProtocolNameList: length-prefixed list of length-prefixed UTF-8 names.
     void protocols;
-    throw new Error("not implemented — see PLAN.md");
+    throw new NotImplementedError("buildAlpn (application_layer_protocol_negotiation)");
 }
 
 /**
@@ -120,12 +120,14 @@ export function parseExtensions(buf: Uint8Array): readonly TlsExtension[] {
     }
     let o = 0;
     const readByte = (): number => {
-        if (o >= buf.length) {
+        const byte = buf[o];
+        if (byte === undefined) {
             throw new TlsHandshakeError("server_hello", {
                 cause: new Error(`extension byte truncated at offset ${o}`),
             });
         }
-        return buf[o++] as number;
+        o++;
+        return byte;
     };
     const extensionsLen = (readByte() << 8) | readByte();
     if (o + extensionsLen > buf.length) {
@@ -150,7 +152,7 @@ export function parseExtensions(buf: Uint8Array): readonly TlsExtension[] {
         }
         const data = buf.subarray(o, o + dataLen);
         o += dataLen;
-        extensions.push({ type: type as ExtensionType, data });
+        extensions.push({ type: wireToExtensionType(type), data });
     }
     return extensions;
 }
@@ -211,6 +213,38 @@ export function wireToNamedGroup(wire: number): NamedGroup {
         default:
             throw new TlsHandshakeError("server_hello", {
                 cause: new Error(`unsupported named group wire value: 0x${wire.toString(16)}`),
+            });
+    }
+}
+
+/**
+ * Validate a raw uint16 as a known {@link ExtensionType}.
+ *
+ * Replaces the previous `type as ExtensionType` cast that pretended any number
+ * was a member of the union. Like {@link wireToNamedGroup}, this fails fast and
+ * typed on an unrecognised value instead of smuggling an invalid type through
+ * the type system.
+ */
+export function wireToExtensionType(wire: number): ExtensionType {
+    switch (wire) {
+        case ExtensionType.SERVER_NAME:
+        case ExtensionType.MAX_FRAGMENT_LENGTH:
+        case ExtensionType.SUPPORTED_GROUPS:
+        case ExtensionType.SIGNATURE_ALGORITHMS:
+        case ExtensionType.USE_SRTP:
+        case ExtensionType.APPLICATION_LAYER_PROTOCOL_NEGOTIATION:
+        case ExtensionType.COMPRESS_CERTIFICATE:
+        case ExtensionType.PRE_SHARED_KEY:
+        case ExtensionType.EARLY_DATA:
+        case ExtensionType.SUPPORTED_VERSIONS:
+        case ExtensionType.COOKIE:
+        case ExtensionType.PSK_KEY_EXCHANGE_MODES:
+        case ExtensionType.KEY_SHARE:
+        case ExtensionType.RENEGOTIATION_INFO:
+            return wire;
+        default:
+            throw new TlsHandshakeError("server_hello", {
+                cause: new Error(`unsupported extension type wire value: 0x${wire.toString(16)}`),
             });
     }
 }

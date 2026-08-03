@@ -8,6 +8,7 @@
  */
 
 import type { ClientHelloConfig } from "../types.js";
+import { TlsProfileError } from "../errors.js";
 
 /**
  * A TLS profile: a named, reusable ClientHello configuration.
@@ -77,7 +78,7 @@ export function getProfile(name: string): TlsProfile | undefined {
 export function resolveProfile(name: string, serverName: string): ClientHelloConfig {
     const profile = PROFILES[name];
     if (!profile) {
-        throw new Error(`unknown TLS profile: ${name}`);
+        throw new TlsProfileError(name);
     }
     return { ...profile.config, serverName };
 }
