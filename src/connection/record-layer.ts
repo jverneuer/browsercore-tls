@@ -61,6 +61,10 @@ export function xorNonce(iv: Uint8Array, seq: number): Uint8Array {
 export async function ensureBytes(readBuffer: Uint8Array, transport: Transport, n: number): Promise<Uint8Array> {
     let buffer = readBuffer;
     while (buffer.length < n) {
+        // Sequential by necessity: each transport.read() delivers a variable
+        // number of bytes and the loop continuation (buffer.length < n) must be
+        // re-evaluated after every read, so the reads cannot be parallelized.
+        // eslint-disable-next-line no-await-in-loop
         const chunk = await transport.read();
         buffer = concat(buffer, chunk);
     }
