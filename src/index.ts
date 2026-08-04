@@ -25,6 +25,7 @@ export {
     type ClientHelloConfig,
     type CloseReason,
     type KeyPair,
+    type Logger,
     type NamedGroup,
     type ProtocolVersion,
     type SignatureScheme,
@@ -34,6 +35,8 @@ export {
     type TrafficSecrets,
     TLS_1_2,
     TLS_1_3,
+    devLogger,
+    silentLogger,
 } from "./types.js";
 
 export { type TlsProfile, MODERN_TLS13_PROFILE, COMPATIBILITY_PROFILE, getProfile, resolveProfile } from "./profiles/profiles.js";
