@@ -13,7 +13,7 @@
  * logic testable in isolation without exposing the buffer.
  */
 
-import type { Transport } from "@browsercore/transport";
+import type { StreamTransport } from "@browsercore/transport";
 import type { TrafficSecrets } from "../types.js";
 import { TlsDecryptError, TlsHandshakeError } from "../errors.js";
 import { ContentType, decryptRecord, encryptRecord, parseRecordHeader, readContentType, serializeRecordHeader } from "../record/record.js";
@@ -58,7 +58,7 @@ export function xorNonce(iv: Uint8Array, seq: number): Uint8Array {
 }
 
 /** Pull bytes from the transport until at least `n` are buffered. Returns the new buffer. */
-export async function ensureBytes(readBuffer: Uint8Array, transport: Transport, n: number): Promise<Uint8Array> {
+export async function ensureBytes(readBuffer: Uint8Array, transport: StreamTransport, n: number): Promise<Uint8Array> {
     let buffer = readBuffer;
     while (buffer.length < n) {
         // Sequential by necessity: each transport.read() delivers a variable
@@ -77,7 +77,7 @@ export async function ensureBytes(readBuffer: Uint8Array, transport: Transport, 
  */
 export async function readHeaderBytes(
     readBuffer: Uint8Array,
-    transport: Transport,
+    transport: StreamTransport,
 ): Promise<{ raw: Uint8Array; length: number; readBuffer: Uint8Array }> {
     const buffer = await ensureBytes(readBuffer, transport, 5);
     const raw = buffer.subarray(0, 5);
@@ -88,7 +88,7 @@ export async function readHeaderBytes(
 /** Read a complete record given its already-consumed header. Returns the new buffer. */
 export async function readRawRecord(
     readBuffer: Uint8Array,
-    transport: Transport,
+    transport: StreamTransport,
     header: { raw: Uint8Array; length: number },
 ): Promise<{ type: ContentType; fragment: Uint8Array; readBuffer: Uint8Array }> {
     const buffer = await ensureBytes(readBuffer, transport, 5 + header.length);
@@ -110,7 +110,7 @@ export async function readRawRecord(
  */
 export async function readEncryptedRecord(
     readBuffer: Uint8Array,
-    transport: Transport,
+    transport: StreamTransport,
     aead: Parameters<typeof encryptRecord>[4],
     traffic: TrafficSecrets,
     seq: number,
@@ -145,7 +145,7 @@ export async function readEncryptedRecord(
 }
 
 /** Write an unencrypted record (used for the initial ClientHello/ServerHello). */
-export async function writeRecord(transport: Transport, type: ContentType, fragment: Uint8Array): Promise<void> {
+export async function writeRecord(transport: StreamTransport, type: ContentType, fragment: Uint8Array): Promise<void> {
     await transport.write(concat(serializeRecordHeader(type, fragment.length), fragment));
 }
 
@@ -155,7 +155,7 @@ export async function writeRecord(transport: Transport, type: ContentType, fragm
  * the plaintext before encryption.
  */
 export function writeEncryptedRecord(
-    transport: Transport,
+    transport: StreamTransport,
     aead: Parameters<typeof encryptRecord>[4],
     traffic: TrafficSecrets,
     innerType: ContentType,

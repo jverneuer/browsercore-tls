@@ -6,7 +6,7 @@
  * but NEVER imports node:crypto directly — that boundary is @browsercore/crypto's job.
  */
 
-import type { Transport } from "@browsercore/transport";
+import type { StreamTransport } from "@browsercore/transport";
 import type { TlsError } from "./errors.js";
 
 /** Branded TLS session identifier. */
@@ -197,7 +197,7 @@ export const devLogger: Logger = {
 /** Public options for {@link connectTls}. */
 export interface TlsOptions {
     /** The underlying byte-stream transport (already connected or connecting). */
-    readonly transport: Transport;
+    readonly transport: StreamTransport;
     /** SNI server name. Defaults to host if omitted. */
     readonly serverName: string;
     /** ClientHello configuration (placeholder until @browsercore/profiles is built). */

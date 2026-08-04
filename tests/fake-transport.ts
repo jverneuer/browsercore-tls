@@ -1,22 +1,16 @@
 /**
- * In-memory Transport stand-in for connection-layer tests.
+ * In-memory StreamTransport stand-in for connection-layer tests.
  *
- * The record layer and handshake driver depend on a {@link Transport} byte
- * stream: `write()` hands bytes off, `read()` returns the next chunk. This fake
- * buffers every write into a queue and replays queued chunks on read(), so tests
- * can drive framing / encryption round-trips and handshake simulations without a
- * real socket. It extends EventEmitter to structurally satisfy the Transport
- * interface (which extends EventEmitter), though the connection code only ever
- * calls read()/write()/close().
+ * The record layer and handshake driver depend on a {@link StreamTransport}
+ * byte stream: `write()` hands bytes off, `read()` returns the next chunk. This
+ * fake buffers every write into a queue and replays queued chunks on read(), so
+ * tests can drive framing / encryption round-trips and handshake simulations
+ * without a real socket.
  */
 
-import { EventEmitter } from "node:events";
-import type { Transport } from "@browsercore/transport";
+import type { StreamTransport } from "@browsercore/transport";
 
-export class FakeTransport extends EventEmitter implements Transport {
-    public readonly id = "tst_test" as Transport["id"];
-    public state: Transport["state"] = { state: "open" };
-
+export class FakeTransport implements StreamTransport {
     /** Bytes written by the higher layer, in write order (each write = one entry). */
     public readonly written: Uint8Array[] = [];
     /** Chunks read() will hand back, in FIFO order. */
@@ -41,7 +35,6 @@ export class FakeTransport extends EventEmitter implements Transport {
 
     public async close(): Promise<void> {
         this.closed = true;
-        this.state = { state: "closed", reason: { kind: "client_close" } };
     }
 
     /** Concatenate everything written so far into a single buffer (test helper). */

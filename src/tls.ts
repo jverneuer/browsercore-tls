@@ -21,7 +21,7 @@
  */
 
 import { crypto, type HashId } from "@browsercore/crypto";
-import type { Transport } from "@browsercore/transport";
+import type { StreamTransport } from "@browsercore/transport";
 import {
     systemClock,
     TLS_1_3,
@@ -67,7 +67,7 @@ const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
  *
  * Performs the full TLS 1.3 handshake, derives traffic secrets, and returns a
  * {@link TlsConnection} that transparently encrypts/decrypts application data.
- * Callers pass an already-connected {@link Transport}, the server name (for SNI
+ * Callers pass an already-connected {@link StreamTransport}, the server name (for SNI
  * + certificate validation), and a resolved profile (cipher suites, key-share
  * groups, signature algorithms).
  */
@@ -134,7 +134,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
     // `transport` is public-read because the handshake driver (HandshakeContext)
     // needs it; it is NOT on the TlsConnection interface, so it does not leak into
     // the package's public API surface.
-    public readonly transport!: Transport;
+    public readonly transport!: StreamTransport;
     private readonly profile!: ClientHelloConfig;
     private readonly serverName!: string;
     private readonly trustAnchors: readonly Uint8Array[] = [];
