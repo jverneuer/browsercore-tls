@@ -11,6 +11,7 @@
 import type { CloseReason, TlsState } from "../types.js";
 import { TlsAlertError, TlsHandshakeError, type TlsError } from "../errors.js";
 import { ContentType } from "../record/record.js";
+import { assertNever } from "../utils.js";
 
 /** Race `run` against a timeout, rejecting with a handshake error if it fires. */
 export async function withTimeout(ms: number, run: () => Promise<void>): Promise<void> {
@@ -31,16 +32,25 @@ export async function withTimeout(ms: number, run: () => Promise<void>): Promise
     }
 }
 
-/** Handle a non-application record encountered while reading application data. */
-export function handlePostHandshakeRecord(innerType: ContentType, content: Uint8Array): void {
+/**
+ * Handle a non-application record encountered while reading application data.
+ *
+ * Routes alerts to {@link handleAlert}, ignores post-handshake handshake
+ * messages (NewSessionTicket, KeyUpdate — out of scope for the happy path),
+ * and rejects any {@link ContentType.CHANGE_CIPHER_SPEC} or
+ * {@link ContentType.APPLICATION_DATA} that appears *inside* an encrypted
+ * record (application data is only valid as the outer record type; TLS 1.3 has
+ * no change_cipher_spec). Returns `true` if the alert was a close_notify and
+ * the connection should close gracefully.
+ */
+export function handlePostHandshakeRecord(innerType: ContentType, content: Uint8Array): boolean {
     switch (innerType) {
         case ContentType.ALERT:
-            handleAlert(content);
-            break;
+            return handleAlert(content).close;
         case ContentType.HANDSHAKE:
             // Post-handshake handshake (e.g. NewSessionTicket, KeyUpdate) — out of
             // scope for the happy path; ignore but do not error.
-            break;
+            return false;
         case ContentType.CHANGE_CIPHER_SPEC:
         case ContentType.APPLICATION_DATA:
             // Neither should appear here: application data is the only expected
@@ -48,6 +58,8 @@ export function handlePostHandshakeRecord(innerType: ContentType, content: Uint8
             throw new TlsHandshakeError("finished", {
                 cause: new Error(`unexpected post-handshake record type ${innerType}`),
             });
+        default:
+            return assertNever(innerType);
     }
 }
 

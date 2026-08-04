@@ -39,7 +39,12 @@ export const MODERN_TLS13_PROFILE: TlsProfile = {
     },
 };
 
-/** TLS 1.2 fallback profile for legacy servers. */
+/**
+ * Broad TLS 1.3 profile: the same modern ciphers as {@link MODERN_TLS13_PROFILE}
+ * plus secp384r1 key shares and additional signature algorithms, for servers
+ * that require a broader offer. TLS 1.2 is intentionally NOT advertised — this
+ * client speaks TLS 1.3 only and rejects TLS 1.2-only handshakes.
+ */
 export const COMPATIBILITY_PROFILE: TlsProfile = {
     name: "compatibility",
     config: {
@@ -55,10 +60,7 @@ export const COMPATIBILITY_PROFILE: TlsProfile = {
             "rsa_pss_rsae_sha256",
             "rsa_pkcs1_sha256",
         ],
-        supportedVersions: [
-            { name: "TLS 1.3", wire: 0x0304 },
-            { name: "TLS 1.2", wire: 0x0303 },
-        ],
+        supportedVersions: [{ name: "TLS 1.3", wire: 0x0304 }],
         serverName: "",
     },
 };

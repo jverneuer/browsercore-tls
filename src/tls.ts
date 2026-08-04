@@ -45,6 +45,7 @@ import type { ServerHello } from "./handshake/handshake.js";
 import {
     ensureOpen,
     handleAlert as handleAlertRecord,
+    handlePostHandshakeRecord as dispatchPostHandshakeRecord,
     emitError,
     notifyClose,
     withTimeout,
@@ -320,41 +321,23 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
 
     /** Handle a non-application record encountered while reading application data. */
     private handlePostHandshakeRecord(innerType: ContentType, content: Uint8Array): void {
-        switch (innerType) {
-            case ContentType.ALERT:
-                this.handleAlert(content);
-                break;
-            case ContentType.HANDSHAKE:
-                // Post-handshake handshake (e.g. NewSessionTicket, KeyUpdate) — out of
-                // scope for the happy path; ignore but do not error.
-                break;
-            case ContentType.CHANGE_CIPHER_SPEC:
-            case ContentType.APPLICATION_DATA:
-                // Neither should appear here: application data is the only expected
-                // outer type, and TLS 1.3 has no change_cipher_spec. Reject typed.
-                throw new TlsHandshakeError("finished", {
-                    cause: new Error(`unexpected post-handshake record type ${innerType}`),
-                });
-        }
-    }
-
-    /**
-     * Translate a received alert into a typed error or a graceful close. The
-     * mapping is a pure function in the lifecycle module; this applies its
-     * result to the connection's state.
-     */
-    private handleAlert(content: Uint8Array): void {
-        const { close, error } = handleAlertRecord(content);
-        if (close) {
-            // close_notify — graceful.
-            this.transition({ state: "closed", reason: { kind: "close_notify" } });
+        if (innerType === ContentType.ALERT) {
+            // Alerts need connection-specific handling (state transition + error
+            // emission) that the shared dispatcher does not own.
+            const { close, error } = handleAlertRecord(content);
+            if (close) {
+                this.transition({ state: "closed", reason: { kind: "close_notify" } });
+                return;
+            }
+            if (error !== undefined) {
+                emitError(this.errorListeners, ensureTlsError(error));
+            }
             return;
         }
-        if (error !== undefined) {
-            // TlsAlertError extends Error, not TlsError — wrap it so listeners
-            // receive a uniform TlsError, matching the pre-refactor behavior.
-            emitError(this.errorListeners, ensureTlsError(error));
-        }
+        // Non-alert types (HANDSHAKE, CHANGE_CIPHER_SPEC, APPLICATION_DATA):
+        // delegate to the shared, tested dispatcher. It ignores post-handshake
+        // handshake messages and throws on unexpected types.
+        void dispatchPostHandshakeRecord(innerType, content);
     }
 
     private transition(next: TlsState): void {
