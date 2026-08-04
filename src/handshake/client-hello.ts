@@ -41,6 +41,23 @@ export const GREASE_VALUES: readonly number[] = Object.freeze([
 ]);
 
 /**
+ * Crypto-backed uniform [0,1) random source — the production default. Reads the
+ * first byte of a 1-byte random draw and guards the indexed access so it satisfies
+ * noUncheckedIndexedAccess without a non-null assertion (`!` is forbidden by the
+ * project coding standards). The throw is unreachable (randomBytes(1) always
+ * returns one byte) but keeps the types honest.
+ */
+function defaultRandomByte(): number {
+    const byte = crypto.randomBytes(1)[0];
+    if (byte === undefined) {
+        throw new TlsHandshakeError("client_hello", {
+            cause: new Error("defaultRandomByte: unreachable — randomBytes(1) returned empty"),
+        });
+    }
+    return byte / 256;
+}
+
+/**
  * Pick a uniform random GREASE value.
  *
  * The random source is injectable for deterministic tests; defaults to a
@@ -48,7 +65,7 @@ export const GREASE_VALUES: readonly number[] = Object.freeze([
  * Math.random (matching the package convention that protocol code uses the
  * crypto provider, never Math).
  */
-export function generateGreaseValue(random: () => number = () => crypto.randomBytes(1)[0]! / 256): number {
+export function generateGreaseValue(random: () => number = defaultRandomByte): number {
     const index = Math.floor(random() * GREASE_VALUES.length);
     const value = GREASE_VALUES[index];
     // GREASE_VALUES.length === 16 is a constant; this is an invariant guard.
@@ -145,7 +162,7 @@ export function cipherSuiteToWire(suite: CipherSuite): number {
 export function buildClientHello(
     config: ClientHelloConfig,
     keyPairs: readonly KeyPair[],
-    random: () => number = () => crypto.randomBytes(1)[0]! / 256,
+    random: () => number = defaultRandomByte,
 ): Uint8Array {
     const greaseValue = config.grease ? generateGreaseValue(random) : 0;
 
@@ -163,8 +180,11 @@ export function buildClientHello(
         }
         return cipherSuiteToWire(suite);
     });
-    if (config.grease) {
-        if (cipherWires.length > 0 && isGreaseValue(cipherWires[0]!)) {
+    if (cipherWires.length > 0 && config.grease) {
+        // The length guard above narrows the element to `number`, so this read
+        // satisfies noUncheckedIndexedAccess without a non-null assertion.
+        const first = cipherWires[0];
+        if (first !== undefined && isGreaseValue(first)) {
             cipherWires[0] = greaseValue;
         } else {
             cipherWires.unshift(greaseValue);
@@ -231,7 +251,9 @@ function buildClientHelloExtensions(
     }
 
     let total = 0;
-    for (const p of parts) total += p.length;
+    for (const p of parts) {
+        total += p.length;
+    }
     const out = new Uint8Array(total);
     let o = 0;
     for (const p of parts) {
