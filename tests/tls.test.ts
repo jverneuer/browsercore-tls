@@ -134,8 +134,6 @@ describe("public API surface", () => {
         expect(typeof connectTls).toBe("function");
     });
 
-    it.todo("connectTls performs the TLS 1.3 handshake and returns a live TlsConnection (see PLAN.md)");
-
     it("TlsConnectionImpl exposes a branded id and starts connecting", () => {
         const conn = new TlsConnectionImpl();
         expect(conn.id).toMatch(/^tls_/);
