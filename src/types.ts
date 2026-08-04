@@ -171,6 +171,29 @@ export const systemClock: Clock = {
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
 };
 
+/**
+ * Logging sink for the TLS stack.
+ *
+ * Injected via {@link TlsOptions.logger} so production code can route events to
+ * its own logger instead of the console. The default (`silentLogger`) emits
+ * nothing — this package is a library, not a CLI.
+ */
+export interface Logger {
+    debug(message: string, ...args: readonly unknown[]): void;
+    warn(message: string, ...args: readonly unknown[]): void;
+    error(message: string, ...args: readonly unknown[]): void;
+}
+
+/** A logger that emits nothing. The default for {@link TlsOptions.logger}. */
+export const silentLogger: Logger = { debug: () => {}, warn: () => {}, error: () => {} };
+
+/** A logger that forwards to the console. Opt-in for local development. */
+export const devLogger: Logger = {
+    debug: (m, ...a) => console.debug(m, ...a),
+    warn: (m, ...a) => console.warn(m, ...a),
+    error: (m, ...a) => console.error(m, ...a),
+};
+
 /** Public options for {@link connectTls}. */
 export interface TlsOptions {
     /** The underlying byte-stream transport (already connected or connecting). */
@@ -191,6 +214,11 @@ export interface TlsOptions {
      * reproducible.
      */
     readonly clock?: Clock;
+    /**
+     * Logging sink. Defaults to {@link silentLogger}. Inject {@link devLogger}
+     * or a custom implementation to observe handshake / lifecycle events.
+     */
+    readonly logger?: Logger;
 }
 
 /**
