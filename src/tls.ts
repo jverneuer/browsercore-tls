@@ -80,16 +80,27 @@ export function generateKeyShares(groups: readonly string[]): Promise<KeyPair[]>
     return Promise.resolve().then(() => {
         const shares: KeyPair[] = [];
         for (const group of groups) {
-            if (group !== "x25519") {
-                // @browsercore/crypto only exposes X25519 key generation today. Other
-                // (EC)DHE groups would need a backend we do not have — fail fast and
-                // typed rather than producing a bogus key.
-                throw new TlsHandshakeError("client_hello", {
-                    cause: new Error(`key share group "${group}" is not supported by the crypto backend`),
-                });
+            switch (group) {
+                case "x25519": {
+                    const kp = crypto.x25519GenerateKeyPair();
+                    shares.push({ algorithm: "x25519", privateKey: kp.secretKey, publicKey: kp.publicKey });
+                    break;
+                }
+                case "secp256r1":
+                case "secp384r1": {
+                    const kp = crypto.ecdhGenerateKeyPair(group);
+                    shares.push({ algorithm: group, privateKey: kp.secretKey, publicKey: kp.publicKey });
+                    break;
+                }
+                default:
+                    // @browsercore/crypto only exposes X25519 and the two NIST ECDH
+                    // curves today. Any other (EC)DHE group would need a backend we
+                    // do not have — fail fast and typed rather than producing a
+                    // bogus key.
+                    throw new TlsHandshakeError("client_hello", {
+                        cause: new Error(`key share group "${group}" is not supported by the crypto backend`),
+                    });
             }
-            const kp = crypto.x25519GenerateKeyPair();
-            shares.push({ algorithm: "x25519", privateKey: kp.secretKey, publicKey: kp.publicKey });
         }
         return shares;
     });

@@ -79,6 +79,32 @@ describe("computeSharedSecret", () => {
         expect(shared).toEqual(expected);
     });
 
+    it("recovers the secp256r1 ECDH shared secret from the server's key share", () => {
+        const client = crypto.ecdhGenerateKeyPair("secp256r1");
+        const server = crypto.ecdhGenerateKeyPair("secp256r1");
+        const keyPairs: KeyPair[] = [
+            { algorithm: "secp256r1", privateKey: client.secretKey, publicKey: client.publicKey },
+        ];
+        const sh = serverHelloWithKeyShare(namedGroupToWire("secp256r1"), server.publicKey);
+        const shared = computeSharedSecret(sh, keyPairs);
+        const expected = crypto.ecdhSharedSecret("secp256r1", client.secretKey, server.publicKey);
+        expect(shared).toEqual(expected);
+        expect(shared).toHaveLength(32);
+    });
+
+    it("recovers the secp384r1 ECDH shared secret from the server's key share", () => {
+        const client = crypto.ecdhGenerateKeyPair("secp384r1");
+        const server = crypto.ecdhGenerateKeyPair("secp384r1");
+        const keyPairs: KeyPair[] = [
+            { algorithm: "secp384r1", privateKey: client.secretKey, publicKey: client.publicKey },
+        ];
+        const sh = serverHelloWithKeyShare(namedGroupToWire("secp384r1"), server.publicKey);
+        const shared = computeSharedSecret(sh, keyPairs);
+        const expected = crypto.ecdhSharedSecret("secp384r1", client.secretKey, server.publicKey);
+        expect(shared).toEqual(expected);
+        expect(shared).toHaveLength(48);
+    });
+
     it("throws when the ServerHello has no key_share extension", () => {
         const client = crypto.x25519GenerateKeyPair();
         const keyPairs: KeyPair[] = [
@@ -140,15 +166,20 @@ describe("computeSharedSecret", () => {
         }
     });
 
-    it("throws for a group the crypto backend cannot compute (secp256r1)", () => {
-        // The backend exposes only X25519 shared-secret; secp256r1 must fail fast.
+    it("throws for a group the crypto backend cannot compute (x448)", () => {
+        // The backend exposes only X25519 and the two NIST ECDH curves; x448
+        // must fail fast rather than producing a bogus secret. Offer x448 in
+        // the client's key pairs so the "did not offer" guard doesn't fire
+        // first — we want to reach the "not supported" branch.
         const client = crypto.x25519GenerateKeyPair();
         const keyPairs: KeyPair[] = [
             { algorithm: "x25519", privateKey: client.secretKey, publicKey: client.publicKey },
-            // Pretend the client also offered secp256r1 (so "did not offer" doesn't fire first).
+            // The cast is safe: this entry exists only to get past the
+            // `kp.algorithm === group` lookup to the group-handling switch.
             { algorithm: "secp256r1", privateKey: new Uint8Array(32), publicKey: new Uint8Array(65) },
+            { algorithm: "x448" as KeyPair["algorithm"], privateKey: new Uint8Array(56), publicKey: new Uint8Array(113) },
         ];
-        const sh = serverHelloWithKeyShare(namedGroupToWire("secp256r1"), new Uint8Array(65));
+        const sh = serverHelloWithKeyShare(namedGroupToWire("x448"), new Uint8Array(113));
         expect(() => computeSharedSecret(sh, keyPairs)).toThrow(TlsHandshakeError);
         try {
             computeSharedSecret(sh, keyPairs);

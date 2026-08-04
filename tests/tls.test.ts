@@ -154,12 +154,41 @@ describe("generateKeyShares", () => {
         expect(kp.privateKey.length).toBeGreaterThan(0);
     });
 
+    it("returns a 65-byte uncompressed secp256r1 public key for the secp256r1 group", async () => {
+        const shares = await generateKeyShares(["secp256r1"]);
+        expect(shares).toHaveLength(1);
+        const kp = shares[0]!;
+        expect(kp.algorithm).toBe("secp256r1");
+        // Uncompressed form: 0x04 || 32-byte x || 32-byte y = 65 bytes.
+        expect(kp.publicKey.length).toBe(65);
+        expect(kp.publicKey[0]).toBe(0x04);
+        expect(kp.privateKey.length).toBe(32);
+    });
+
+    it("returns a 97-byte uncompressed secp384r1 public key for the secp384r1 group", async () => {
+        const shares = await generateKeyShares(["secp384r1"]);
+        expect(shares).toHaveLength(1);
+        const kp = shares[0]!;
+        expect(kp.algorithm).toBe("secp384r1");
+        // Uncompressed form: 0x04 || 48-byte x || 48-byte y = 97 bytes.
+        expect(kp.publicKey.length).toBe(97);
+        expect(kp.publicKey[0]).toBe(0x04);
+        expect(kp.privateKey.length).toBe(48);
+    });
+
+    it("generates shares for multiple groups in one call", async () => {
+        const shares = await generateKeyShares(["x25519", "secp256r1", "secp384r1"]);
+        expect(shares).toHaveLength(3);
+        expect(shares.map((s) => s.algorithm)).toEqual(["x25519", "secp256r1", "secp384r1"]);
+    });
+
     it("rejects any group the crypto backend cannot generate", async () => {
-        // The crypto backend only exposes X25519 key generation — other (EC)DHE
-        // groups fail fast with a typed handshake error rather than a bogus key.
-        await expect(generateKeyShares(["secp256r1"])).rejects.toThrow(TlsHandshakeError);
+        // The crypto backend only exposes X25519 and the two NIST ECDH curves —
+        // other (EC)DHE groups fail fast with a typed handshake error rather than
+        // a bogus key.
+        await expect(generateKeyShares(["x448"])).rejects.toThrow(TlsHandshakeError);
         try {
-            await generateKeyShares(["secp256r1"]);
+            await generateKeyShares(["x448"]);
         } catch (e) {
             const err = e as TlsHandshakeError;
             expect(err.phase).toBe("client_hello");
