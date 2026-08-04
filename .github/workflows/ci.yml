@@ -25,6 +25,15 @@ jobs:
           node-version: 26
           registry-url: https://registry.npmjs.org
       - run: npm install
+      - name: Enforce no console.log in src/
+        run: |
+          VIOLATIONS=$(grep -rnE 'console\.(log|warn|error)\(' src/ || true)
+          if [ -n "$VIOLATIONS" ]; then
+            echo "ERROR: console.log/warn/error found in src/. Use injected Logger instead."
+            echo "$VIOLATIONS"
+            exit 1
+          fi
+          echo "No console.log in src/: OK"
       - run: npm run typecheck
       - run: npm run lint -- --deny-warnings
       - run: npm test -- --coverage
