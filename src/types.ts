@@ -148,6 +148,39 @@ export interface ClientHelloConfig {
      * group. Real Chrome sets this; real Firefox does not.
      */
     readonly grease: boolean;
+    /**
+     * Pre-shared key parameters for a resumed handshake. When set, the
+     * pre_shared_key extension is emitted with the ticket identity + binder
+     * values (RFC 8446 §4.2.11). The early_data extension is added alongside
+     * PSK when `offerEarlyData` is true. `undefined` for full (non-resumed)
+     * handshakes.
+     */
+    readonly psk?: ClientHelloPskParams;
+}
+
+/**
+ * Parameters for emitting the pre_shared_key extension in a resumed ClientHello.
+ *
+ * The binders are HMAC values computed over the truncated ClientHello
+ * (identities only, no binders) under the PSK binder key. RFC 8446 §4.2.11
+ * mandates exactly one identity per offered PSK and a matching binder per
+ * identity.
+ */
+export interface ClientHelloPskParams {
+    /** Resumption PSK (Hash.length bytes) — used to derive the binder_key. */
+    readonly psk: Uint8Array;
+    /** Cipher suite of the stored session — selects the hash for binder computation. */
+    readonly cipherSuite: CipherSuite;
+    /** The ticket identity (opaque bytes) to present. */
+    readonly identity: Uint8Array;
+    /** Obfuscated ticket age (RFC 8446 §4.2.11.1), in milliseconds. */
+    readonly obfuscatedTicketAge: number;
+    /**
+     * If true, the early_data extension (type 42) is emitted alongside PSK,
+     * signaling that the client intends to send 0-RTT data. Only valid when the
+     * stored session permits early data.
+     */
+    readonly offerEarlyData: boolean;
 }
 
 /** Public options for {@link connectTls}. */

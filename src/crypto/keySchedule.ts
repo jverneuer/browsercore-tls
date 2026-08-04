@@ -227,14 +227,20 @@ export function deriveTrafficSecrets(
  * and must be retained by the handshake driver — they are NOT the same as the
  * record-protection TrafficSecrets returned by {@link deriveHandshakeSecrets}.
  *
+ * When resuming a session with a PSK (`earlySecret` supplied), the early_secret
+ * is derived from the PSK (HKDF-Extract(0, PSK)) instead of zeros — this is the
+ * PSK-based key schedule branch of RFC 8446 §7.1.
+ *
  * @param sharedSecret    (EC)DHE shared secret from @browsercore/crypto.
  * @param helloTranscript Transcript hash of ClientHello..ServerHello.
  * @param cipherSuite     Negotiated cipher suite (selects hash + AEAD sizes).
+ * @param earlySecret     Optional pre-derived early_secret (for PSK resumption).
  */
 export function deriveHandshakeTrafficSecrets(
     sharedSecret: Uint8Array,
     helloTranscript: Uint8Array,
     cipherSuite: CipherSuite,
+    earlySecret?: Uint8Array,
 ): {
     masterSecret: Uint8Array;
     clientTrafficSecret: Uint8Array;
@@ -244,11 +250,13 @@ export function deriveHandshakeTrafficSecrets(
     const hashLen = hashLengthFor(hash);
     const zeros = new Uint8Array(hashLen);
 
-    // early_secret = HKDF-Extract(0, 0)
-    const earlySecret = hkdfExtract(hash, zeros, zeros);
+    // early_secret = HKDF-Extract(salt=0, IKM=PSK) when resuming, else
+    // early_secret = HKDF-Extract(0, 0). When the caller passes earlySecret we
+    // take the PSK-based branch of RFC 8446 §7.1 verbatim.
+    const early = earlySecret ?? hkdfExtract(hash, zeros, zeros);
 
     // derived = HKDF-Expand-Label(early_secret, "derived", "", Hash.length)
-    const derived = hkdfExpandLabel(earlySecret, "derived", new Uint8Array(0), hashLen, hash);
+    const derived = hkdfExpandLabel(early, "derived", new Uint8Array(0), hashLen, hash);
 
     // handshake_secret = HKDF-Extract(derived, sharedSecret)
     const handshakeSecret = hkdfExtract(hash, derived, sharedSecret);
@@ -359,6 +367,62 @@ export function assertVersionSupported(selected: ProtocolVersion): void {
             cause: new Error(`unsupported protocol version: ${selected.name}`),
         });
     }
+}
+
+// ---------------------------------------------------------------------------
+// Session resumption / PSK binder key schedule (RFC 8446 §4.2.11.2, §7.1).
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive the early_secret from a pre-shared key for PSK resumption.
+ *
+ *   early_secret = HKDF-Extract(salt=0, IKM=PSK)
+ *
+ * This is the PSK-based branch of the TLS 1.3 key schedule (RFC 8446 §7.1):
+ * instead of deriving early_secret from zeros (the non-PSK path), it is derived
+ * from the resumption PSK.
+ *
+ * @param psk  Resumption PSK (Hash.length bytes).
+ * @param hash Hash function for the resumed cipher suite.
+ */
+export function deriveEarlySecretFromPsk(psk: Uint8Array, hash: HashId): Uint8Array {
+    const hashLen = hashLengthFor(hash);
+    const zeros = new Uint8Array(hashLen);
+    return hkdfExtract(hash, zeros, psk);
+}
+
+/**
+ * Derive the binder_key from the early_secret (RFC 8446 §4.2.11.2).
+ *
+ *   binder_key = Derive-Secret(early_secret, "res binder", "")
+ *
+ * Used to compute the PSK binder values that authenticate the PSK identity in
+ * the ClientHello.
+ *
+ * @param earlySecret The early_secret (from {@link deriveEarlySecretFromPsk}).
+ * @param hash        Hash function for the resumed cipher suite.
+ */
+export function deriveBinderKey(earlySecret: Uint8Array, hash: HashId): Uint8Array {
+    const hashLen = hashLengthFor(hash);
+    return hkdfExpandLabel(earlySecret, "res binder", new Uint8Array(0), hashLen, hash);
+}
+
+/**
+ * Compute the PSK binder value for a single PSK identity.
+ *
+ *   binder = HMAC(binder_key, Transcript-Hash(TruncatedClientHello))
+ *
+ * The truncated ClientHello is the full ClientHello with the PSK binders field
+ * stripped (only the identities portion remains). The caller (client-hello.ts)
+ * serializes that truncated body and passes it here.
+ *
+ * @param binderKey       Binder key from {@link deriveBinderKey}.
+ * @param truncatedHello  Serialized truncated ClientHello (identities only).
+ * @param hash            Hash function for the resumed cipher suite.
+ */
+export function computeBinder(binderKey: Uint8Array, truncatedHello: Uint8Array, hash: HashId): Uint8Array {
+    const helloHash = hash === "SHA-384" ? crypto.sha384(truncatedHello) : crypto.sha256(truncatedHello);
+    return crypto.hmac(hash, binderKey, helloHash);
 }
 
 void assertNever;
