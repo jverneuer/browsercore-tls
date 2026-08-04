@@ -200,6 +200,10 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
         }
         // Read encrypted records until an application-data payload arrives.
         for (;;) {
+            // Sequential by necessity: each iteration mutates readBuffer and
+            // serverAppSeq and may early-return on APPLICATION_DATA; records must
+            // be processed in order, so the read cannot be parallelized.
+            // eslint-disable-next-line no-await-in-loop
             const { innerType, content, readBuffer } = await readEncryptedRecord(
                 this.readBuffer,
                 this.transport,
