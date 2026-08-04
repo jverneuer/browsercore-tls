@@ -12,12 +12,17 @@ import { assertNever } from "../utils.js";
 /** TLS extension types, per IANA / RFC 8446. */
 export const ExtensionType = {
     SERVER_NAME: 0,
-    MAX_FRAGMENT_LENGTH: 1,
+    STATUS_REQUEST: 5,
     SUPPORTED_GROUPS: 10,
+    EC_POINT_FORMATS: 11,
     SIGNATURE_ALGORITHMS: 13,
     USE_SRTP: 14,
     APPLICATION_LAYER_PROTOCOL_NEGOTIATION: 16,
+    APPLICATION_SETTINGS: 17513,
+    SIGNED_CERTIFICATE_TIMESTAMP: 18,
+    EXTENDED_MASTER_SECRET: 23,
     COMPRESS_CERTIFICATE: 27,
+    SESSION_TICKET: 35,
     PRE_SHARED_KEY: 41,
     EARLY_DATA: 42,
     SUPPORTED_VERSIONS: 43,
@@ -117,19 +122,35 @@ export function findExtension(
     return extensions.find((ext) => ext.type === type);
 }
 
-/** IANA wire value for a signature scheme (subset). */
+/**
+ * IANA wire value for a signature scheme.
+ *
+ * Covers every scheme the shipped browser profiles offer. Values come from the
+ * IANA TLS Signature Scheme Registry and match `@browsercore/profiles`' canonical
+ * table.
+ */
 export function signatureSchemeToWire(scheme: SignatureScheme): number {
     switch (scheme) {
         case "ecdsa_secp256r1_sha256":
             return 0x0403;
         case "ecdsa_secp384r1_sha384":
             return 0x0503;
+        case "ed25519":
+            return 0x0807;
         case "rsa_pss_rsae_sha256":
             return 0x0804;
         case "rsa_pss_rsae_sha384":
             return 0x0805;
+        case "rsa_pss_rsae_sha512":
+            return 0x0806;
         case "rsa_pkcs1_sha256":
             return 0x0401;
+        case "rsa_pkcs1_sha384":
+            return 0x0501;
+        case "rsa_pkcs1_sha512":
+            return 0x0601;
+        case "rsa_pkcs1_sha1":
+            return 0x0201;
         default:
             return assertNever(scheme);
     }
@@ -176,16 +197,25 @@ export function wireToNamedGroup(wire: number): NamedGroup {
  * was a member of the union. Like {@link wireToNamedGroup}, this fails fast and
  * typed on an unrecognised value instead of smuggling an invalid type through
  * the type system.
+ *
+ * GREASE values (RFC 8701, the 0x?a?a pattern) are intentionally accepted and
+ * returned as-is: real browsers send GREASE extensions that a parser must
+ * tolerate and ignore, not reject.
  */
 export function wireToExtensionType(wire: number): ExtensionType {
     switch (wire) {
         case ExtensionType.SERVER_NAME:
-        case ExtensionType.MAX_FRAGMENT_LENGTH:
+        case ExtensionType.STATUS_REQUEST:
         case ExtensionType.SUPPORTED_GROUPS:
+        case ExtensionType.EC_POINT_FORMATS:
         case ExtensionType.SIGNATURE_ALGORITHMS:
         case ExtensionType.USE_SRTP:
         case ExtensionType.APPLICATION_LAYER_PROTOCOL_NEGOTIATION:
+        case ExtensionType.APPLICATION_SETTINGS:
+        case ExtensionType.SIGNED_CERTIFICATE_TIMESTAMP:
+        case ExtensionType.EXTENDED_MASTER_SECRET:
         case ExtensionType.COMPRESS_CERTIFICATE:
+        case ExtensionType.SESSION_TICKET:
         case ExtensionType.PRE_SHARED_KEY:
         case ExtensionType.EARLY_DATA:
         case ExtensionType.SUPPORTED_VERSIONS:
@@ -195,9 +225,20 @@ export function wireToExtensionType(wire: number): ExtensionType {
         case ExtensionType.RENEGOTIATION_INFO:
             return wire;
         default:
+            // GREASE sentinels (0x?a?a) are valid but unrecognised; tolerate them.
+            if (isGreaseValue(wire)) {
+                return wire as ExtensionType;
+            }
             throw new TlsHandshakeError("server_hello", {
                 cause: new Error(`unsupported extension type wire value: 0x${wire.toString(16)}`),
             });
     }
+}
+
+/** A GREASE value follows the 0x?a?a pattern (byte 0x?a repeated), per RFC 8701. */
+function isGreaseValue(type: number): boolean {
+    const hi = (type >> 8) & 0xff;
+    const lo = type & 0xff;
+    return type > 0 && hi === lo && (lo & 0x0f) === 0x0a;
 }
 

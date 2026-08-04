@@ -21,32 +21,98 @@ import type {
 import { TlsHandshakeError, TlsKeyScheduleError } from "../errors.js";
 import { assertNever } from "../utils.js";
 
-/** Map a cipher suite to its HKDF hash function (all TLS 1.3 suites use SHA-256/384). */
+/**
+ * Map a cipher suite to its HKDF hash function.
+ *
+ * Only the four TLS 1.3 AEAD suites can be negotiated; they all use SHA-256
+ * except AES-256-GCM, which uses SHA-384. TLS 1.2 suites can't be negotiated by
+ * this client, so the default throws rather than guessing a hash.
+ */
 export function cipherSuiteToHash(cipherSuite: CipherSuite): HashId {
     switch (cipherSuite) {
+        // The four TLS 1.3 AEAD suites — the only ones this client can negotiate.
         case "TLS_AES_256_GCM_SHA384":
             return SHA_384;
         case "TLS_AES_128_GCM_SHA256":
         case "TLS_CHACHA20_POLY1305_SHA256":
         case "TLS_AES_128_CCM_SHA256":
             return SHA_256;
+        // TLS 1.2 suites (and the GREASE placeholder) appear only in the offered
+        // list and can never be negotiated in TLS 1.3, so they have no HKDF hash.
+        case "TLS_GREASE_RESERVED_0":
+        case "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256":
+        case "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256":
+        case "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384":
+        case "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384":
+        case "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256":
+        case "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256":
+        case "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA":
+        case "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA":
+        case "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA":
+        case "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA":
+        case "TLS_RSA_WITH_AES_128_GCM_SHA256":
+        case "TLS_RSA_WITH_AES_256_GCM_SHA384":
+        case "TLS_RSA_WITH_AES_128_CBC_SHA":
+        case "TLS_RSA_WITH_AES_256_CBC_SHA":
+            return throwKeyScheduleError(
+                `cipher suite ${cipherSuite} has no HKDF hash mapping — not a negotiable TLS 1.3 suite`,
+            );
         default:
+            // Every CipherSuite member is covered above; this is unreachable but
+            // keeps the switch exhaustive if the union is ever extended.
             return assertNever(cipherSuite);
     }
 }
 
-/** Map a cipher suite to its AEAD key length in bytes. */
+/**
+ * Map a cipher suite to its AEAD key length in bytes.
+ *
+ * Only meaningful for the four negotiable TLS 1.3 AEAD suites. TLS 1.2 suites
+ * can't be negotiated, so the default throws.
+ */
 export function cipherSuiteKeyLength(cipherSuite: CipherSuite): number {
     switch (cipherSuite) {
+        // The four TLS 1.3 AEAD suites — the only ones this client can negotiate.
         case "TLS_AES_128_GCM_SHA256":
         case "TLS_AES_128_CCM_SHA256":
             return 16;
         case "TLS_AES_256_GCM_SHA384":
         case "TLS_CHACHA20_POLY1305_SHA256":
             return 32;
+        // TLS 1.2 suites (and the GREASE placeholder) appear only in the offered
+        // list and can never be negotiated in TLS 1.3, so they have no AEAD key length.
+        case "TLS_GREASE_RESERVED_0":
+        case "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256":
+        case "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256":
+        case "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384":
+        case "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384":
+        case "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256":
+        case "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256":
+        case "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA":
+        case "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA":
+        case "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA":
+        case "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA":
+        case "TLS_RSA_WITH_AES_128_GCM_SHA256":
+        case "TLS_RSA_WITH_AES_256_GCM_SHA384":
+        case "TLS_RSA_WITH_AES_128_CBC_SHA":
+        case "TLS_RSA_WITH_AES_256_CBC_SHA":
+            return throwKeyScheduleError(
+                `cipher suite ${cipherSuite} has no AEAD key length — not a negotiable TLS 1.3 suite`,
+            );
         default:
+            // Every CipherSuite member is covered above; this is unreachable but
+            // keeps the switch exhaustive if the union is ever extended.
             return assertNever(cipherSuite);
     }
+}
+
+/**
+ * Throw a {@link TlsKeyScheduleError} and return `never`, so call sites can use
+ * `return throwKeyScheduleError(...)` to satisfy `consistent-return` while failing
+ * fast with a descriptive message.
+ */
+function throwKeyScheduleError(message: string): never {
+    throw new TlsKeyScheduleError("SHA-256", message);
 }
 
 /** Map a cipher suite to its AEAD IV length in bytes (all TLS 1.3 AEADs use 12). */

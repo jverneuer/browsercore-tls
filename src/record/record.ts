@@ -63,9 +63,18 @@ export function readContentType(byte: number): ContentType {
     }
 }
 
-/** Map a cipher suite to its AEAD algorithm. */
+/**
+ * Map a cipher suite to its AEAD algorithm.
+ *
+ * Only the four TLS 1.3 AEAD suites can ever be the *negotiated* suite in a
+ * TLS 1.3 handshake, so only those map to an AEAD. TLS 1.2 suites appear in the
+ * offered ClientHello list but can never be negotiated by this TLS-1.3-only
+ * client — reaching the default with one means the server selected a suite we
+ * can't speak, which is a protocol violation we fail fast on.
+ */
 export function cipherSuiteToAead(cipherSuite: CipherSuite): AeadAlgorithm {
     switch (cipherSuite) {
+        // The four TLS 1.3 AEAD suites — the only ones this client can negotiate.
         case "TLS_AES_128_GCM_SHA256":
             return "AES-128-GCM";
         case "TLS_AES_128_CCM_SHA256":
@@ -74,16 +83,48 @@ export function cipherSuiteToAead(cipherSuite: CipherSuite): AeadAlgorithm {
             // is never offered in any profile. Fail loudly if it ever reaches here
             // rather than silently substituting AES-128-GCM, which would let the
             // handshake complete and then fail every subsequent record decrypt.
-            throw new NotImplementedError(
+            return throwNotImplemented(
                 "AES-128-CCM (TLS_AES_128_CCM_SHA256) — not backed by @browsercore/crypto",
             );
         case "TLS_AES_256_GCM_SHA384":
             return "AES-256-GCM";
         case "TLS_CHACHA20_POLY1305_SHA256":
             return "CHACHA20-POLY1305";
+        // TLS 1.2 suites (and the GREASE placeholder) appear only in the offered
+        // list and can never be negotiated in TLS 1.3. The server selecting one is
+        // a protocol error we fail fast on.
+        case "TLS_GREASE_RESERVED_0":
+        case "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256":
+        case "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256":
+        case "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384":
+        case "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384":
+        case "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256":
+        case "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256":
+        case "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA":
+        case "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA":
+        case "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA":
+        case "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA":
+        case "TLS_RSA_WITH_AES_128_GCM_SHA256":
+        case "TLS_RSA_WITH_AES_256_GCM_SHA384":
+        case "TLS_RSA_WITH_AES_128_CBC_SHA":
+        case "TLS_RSA_WITH_AES_256_CBC_SHA":
+            return throwNotImplemented(
+                `cipher suite ${cipherSuite} has no AEAD mapping — not a negotiable TLS 1.3 suite`,
+            );
         default:
+            // Every CipherSuite member is covered above; this is unreachable but
+            // keeps the switch exhaustive if the union is ever extended.
             return assertNever(cipherSuite);
     }
+}
+
+/**
+ * Throw a {@link NotImplementedError} and return `never`, so call sites can use
+ * `return throwNotImplemented(...)` to satisfy `consistent-return` while failing
+ * fast with a descriptive message.
+ */
+function throwNotImplemented(message: string): never {
+    throw new NotImplementedError(message);
 }
 
 /**

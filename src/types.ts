@@ -32,12 +32,36 @@ export type AeadAlgorithm =
     | "AES-256-GCM"
     | "CHACHA20-POLY1305";
 
-/** A TLS 1.3 cipher suite (AEAD + hash). String-literal union — never bare string. */
+/**
+ * A TLS cipher suite. String-literal union — never bare string.
+ *
+ * This union covers every suite the shipped browser profiles offer: the four
+ * TLS 1.3 AEAD suites (the only ones a TLS 1.3 handshake can *negotiate*) plus
+ * the TLS 1.2 suites and the GREASE placeholder that real browsers place in the
+ * *offered* ClientHello list for middlebox compatibility. The negotiated suite
+ * is always one of the four AEAD suites; the TLS 1.2 names only ever appear in
+ * the offered list.
+ */
 export type CipherSuite =
+    | "TLS_GREASE_RESERVED_0"
     | "TLS_AES_128_GCM_SHA256"
     | "TLS_AES_256_GCM_SHA384"
     | "TLS_CHACHA20_POLY1305_SHA256"
-    | "TLS_AES_128_CCM_SHA256";
+    | "TLS_AES_128_CCM_SHA256"
+    | "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"
+    | "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
+    | "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384"
+    | "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"
+    | "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256"
+    | "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256"
+    | "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA"
+    | "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA"
+    | "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA"
+    | "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA"
+    | "TLS_RSA_WITH_AES_128_GCM_SHA256"
+    | "TLS_RSA_WITH_AES_256_GCM_SHA384"
+    | "TLS_RSA_WITH_AES_128_CBC_SHA"
+    | "TLS_RSA_WITH_AES_256_CBC_SHA";
 
 /** Named groups for key share (ECDHE). */
 export type NamedGroup =
@@ -46,13 +70,24 @@ export type NamedGroup =
     | "x25519"
     | "x448";
 
-/** Signature algorithms for certificate verification. */
+/**
+ * Signature algorithms for certificate verification.
+ *
+ * Covers every scheme the shipped browser profiles offer (chrome-140,
+ * firefox-128). The negotiated scheme is validated against this list by the
+ * server; offering the real-browser set is what makes the fingerprint pass.
+ */
 export type SignatureScheme =
     | "ecdsa_secp256r1_sha256"
     | "ecdsa_secp384r1_sha384"
+    | "ed25519"
     | "rsa_pss_rsae_sha256"
     | "rsa_pss_rsae_sha384"
-    | "rsa_pkcs1_sha256";
+    | "rsa_pss_rsae_sha512"
+    | "rsa_pkcs1_sha256"
+    | "rsa_pkcs1_sha384"
+    | "rsa_pkcs1_sha512"
+    | "rsa_pkcs1_sha1";
 
 /** Why a TLS connection was closed. Discriminated union — every case is explicit. */
 export type CloseReason =
@@ -79,10 +114,23 @@ export type TlsState =
     }
     | { readonly state: "closed"; readonly reason: CloseReason };
 
-/** Configuration for building a ClientHello. Placeholder until @browsercore/profiles. */
+/**
+ * Configuration for building a ClientHello.
+ *
+ * Driven by a browser profile: the offered cipher suites, the exact extension
+ * order, the GREASE flag, key-share groups, signature algorithms, supported
+ * versions, SNI, and ALPN. Higher layers (fetch) translate a `BrowserProfile`
+ * into this shape.
+ */
 export interface ClientHelloConfig {
     /** Ordered list of cipher suites the client advertises (most-preferred first). */
     readonly cipherSuites: readonly CipherSuite[];
+    /**
+     * Extension types in the exact order they must appear in the ClientHello.
+     * Every type present here is emitted; anything absent is omitted. This is
+     * the primary fingerprinting signal, so the order is load-bearing.
+     */
+    readonly extensionOrder: readonly number[];
     /** Named groups for key share, ordered by preference. */
     readonly keyShareGroups: readonly NamedGroup[];
     /** Signature algorithms the client accepts in CertificateVerify. */
@@ -93,6 +141,12 @@ export interface ClientHelloConfig {
     readonly serverName: string;
     /** ALPN protocols the client wishes to negotiate (e.g. "h2", "http/1.1"). */
     readonly alpnProtocols?: readonly string[];
+    /**
+     * Whether to inject GREASE (RFC 8701) sentinel values: a GREASE cipher suite
+     * at the front of the list, a GREASE extension, and a GREASE key-share
+     * group. Real Chrome sets this; real Firefox does not.
+     */
+    readonly grease: boolean;
 }
 
 /** Public options for {@link connectTls}. */
