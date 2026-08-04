@@ -19,7 +19,7 @@
 import { describe, it, expect } from "vitest";
 import { crypto } from "@browsercore/crypto";
 import { buildClientHello } from "../src/handshake/client-hello.js";
-import { cipherSuiteToWire } from "../src/handshake/client-hello.js";
+import { cipherSuiteToWire, GREASE_VALUES, isGreaseValue } from "../src/handshake/client-hello.js";
 import { ExtensionType } from "../src/extensions/extensions.js";
 import { TLS_1_3 } from "../src/types.js";
 import type { ClientHelloConfig, KeyPair } from "../src/types.js";
@@ -159,9 +159,12 @@ describe("Bug 2: extensions are emitted in the profile's exact order, all 16 of 
         const extensions = parseExtensions(extBlock);
         const types = extensions.map((e) => e.type);
 
-        // GREASE (0x0a0a) prepended, then the profile's 16 in order.
-        const expected = [0x0a0a, ...CHROME140_EXTENSION_ORDER];
-        expect(types).toEqual(expected);
+        // A GREASE sentinel is prepended ahead of the profile's 16 in order.
+        // Real Chrome randomizes the exact 0x?a?a value per-connection, so we
+        // assert membership in the RFC 8701 set rather than a fixed value, and
+        // that the remainder matches the profile order exactly.
+        expect(GREASE_VALUES).toContain(types[0]);
+        expect(types.slice(1)).toEqual(CHROME140_EXTENSION_ORDER);
     });
 
     it("emits all 16 profile extensions (not just the 5 hardcoded ones)", async () => {
@@ -197,32 +200,36 @@ describe("Bug 2: extensions are emitted in the profile's exact order, all 16 of 
 });
 
 describe("Bug 3: GREASE values are generated when grease=true", () => {
-    it("prepends a GREASE cipher suite (0x0a0a) at the front of the list", async () => {
+    it("prepends a GREASE cipher suite at the front of the list", async () => {
         const config = chrome140Config();
         const kps = await makeKeyPairs();
-        const hello = buildClientHello(config, kps);
+        // Fix the random source so the assertion is deterministic.
+        const hello = buildClientHello(config, kps, () => 0.0);
         let o = 4 + 2 + 32;
         o += 1 + hello[o]!; // session id
         const csLen = (hello[o]! << 8) | hello[o + 1]!;
         o += 2;
         expect(csLen).toBeGreaterThan(0);
         const firstWire = (hello[o]! << 8) | hello[o + 1]!;
-        expect(firstWire).toBe(0x0a0a);
+        // random()=0.0 -> index 0 -> GREASE_VALUES[0] = 0x0a0a.
+        expect(firstWire).toBe(GREASE_VALUES[0]);
+        expect(GREASE_VALUES).toContain(firstWire);
     });
 
-    it("prepends a GREASE extension (type 0x0a0a) ahead of the profile order", async () => {
+    it("prepends a GREASE extension ahead of the profile order", async () => {
         const config = chrome140Config();
         const kps = await makeKeyPairs();
-        const hello = buildClientHello(config, kps);
+        const hello = buildClientHello(config, kps, () => 0.0);
         const extBlock = extractExtensionsBlock(hello);
         const extensions = parseExtensions(extBlock);
-        expect(extensions[0]!.type).toBe(0x0a0a);
+        expect(extensions[0]!.type).toBe(GREASE_VALUES[0]);
+        expect(GREASE_VALUES).toContain(extensions[0]!.type);
     });
 
-    it("prepends a GREASE key-share group (0x0a0a) in the key_share extension", async () => {
+    it("prepends a GREASE key-share group in the key_share extension", async () => {
         const config = chrome140Config();
         const kps = await makeKeyPairs();
-        const hello = buildClientHello(config, kps);
+        const hello = buildClientHello(config, kps, () => 0.0);
         const extBlock = extractExtensionsBlock(hello);
         const extensions = parseExtensions(extBlock);
         const ks = extensions.find((e) => e.type === ExtensionType.KEY_SHARE);
@@ -230,7 +237,8 @@ describe("Bug 3: GREASE values are generated when grease=true", () => {
         // key_share body: client_shares_len(2) || share { group(2), len(2), key }.
         const data = ks!.data;
         const firstGroup = (data[2]! << 8) | data[3]!;
-        expect(firstGroup).toBe(0x0a0a);
+        expect(firstGroup).toBe(GREASE_VALUES[0]);
+        expect(GREASE_VALUES).toContain(firstGroup);
     });
 
     it("emits NO GREASE values when grease=false (firefox-style profile)", async () => {
@@ -250,15 +258,15 @@ describe("Bug 3: GREASE values are generated when grease=true", () => {
         let o = 4 + 2 + 32;
         o += 1 + hello[o]!;
         const firstCipherWire = (hello[o + 2]! << 8) | hello[o + 3]!;
-        expect(firstCipherWire).not.toBe(0x0a0a);
+        expect(isGreaseValue(firstCipherWire)).toBe(false);
 
         // No GREASE extension or key-share group.
         const extBlock = extractExtensionsBlock(hello);
         const extensions = parseExtensions(extBlock);
         const types = extensions.map((e) => e.type);
-        expect(types[0]).not.toBe(0x0a0a);
+        expect(isGreaseValue(types[0]!)).toBe(false);
         const ks = extensions.find((e) => e.type === ExtensionType.KEY_SHARE);
         const firstGroup = (ks!.data[2]! << 8) | ks!.data[3]!;
-        expect(firstGroup).not.toBe(0x0a0a);
+        expect(isGreaseValue(firstGroup)).toBe(false);
     });
 });
