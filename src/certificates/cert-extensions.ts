@@ -180,12 +180,11 @@ export function parseKeyUsage(value: Uint8Array): {
     }
     // The bits are left-aligned; the real bit 0 is the most significant bit of
     // the first used byte. digitalSignature = bit 0, keyEncipherment = bit 2.
-    const totalBits = usedBytes.length * 8;
-    const bitPosition = (bitIndex: number): number => totalBits - 1 - bitIndex;
+    // bitIndex therefore maps directly to a big-endian bit position (0 = MSB of
+    // the first byte), so no reversal is applied.
     const getBit = (index: number): boolean => {
-        const pos = bitPosition(index);
-        const byteIndex = Math.floor(pos / 8);
-        const bitInByte = pos % 8;
+        const byteIndex = Math.floor(index / 8);
+        const bitInByte = index % 8;
         const byte = usedBytes[byteIndex];
         if (byte === undefined) {
             return false;

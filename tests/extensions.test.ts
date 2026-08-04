@@ -171,3 +171,60 @@ describe("wireToNamedGroup", () => {
     });
 });
 
+describe("parseExtensions byte-truncation guard", () => {
+    it("throws when reading an extension byte past the end of the buffer", () => {
+        // extensions_len = 10, so the outer `o + extensionsLen > buf.length`
+        // check (line 87) looks at o=2: 2 + 10 = 12 > 4 → this throws there.
+        // To reach the inner readByte byte===undefined guard we need a buffer
+        // where the length prefix passes the outer check but a sub-read runs
+        // past the end: extensions_len=2, exactly 2 trailing bytes → the header
+        // read consumes them, then the data-len read in the loop goes past.
+        // Layout: extensions_len=2, then a 2-byte extension (type only, no
+        // data_len/data). Reading data_len at o=4 reads buf[4],[5] = undefined.
+        const block = new Uint8Array([0x00, 0x02, 0x00, 0x2b]);
+        try {
+            parseExtensions(block);
+            expect.unreachable("expected a throw");
+        } catch (e) {
+            const err = e as TlsHandshakeError;
+            expect(err).toBeInstanceOf(TlsHandshakeError);
+            expect(err.phase).toBe("server_hello");
+        }
+    });
+});
+
+describe("wireToExtensionType (parseExtensions unknown type)", () => {
+    it("rejects an extension whose type wire value is unknown", () => {
+        // A single extension of type 0x0099 (not a legal ExtensionType) with a
+        // 1-byte body. parseExtensions decodes it via wireToExtensionType, which
+        // must reject the unknown type rather than smuggle it through as a
+        // number.
+        const ext = new Uint8Array([0x00, 0x99, 0x00, 0x01, 0x42]);
+        const total = ext.length;
+        const block = new Uint8Array(2 + total);
+        block[0] = (total >> 8) & 0xff;
+        block[1] = total & 0xff;
+        block.set(ext, 2);
+        try {
+            parseExtensions(block);
+            expect.unreachable("expected a throw");
+        } catch (e) {
+            const err = e as TlsHandshakeError;
+            expect(err).toBeInstanceOf(TlsHandshakeError);
+            expect(err.cause?.message).toMatch(/unsupported extension type/);
+        }
+    });
+});
+
+describe("exhaustiveness guards (default -> assertNever)", () => {
+    it("signatureSchemeToWire hits the default branch for an unrecognised scheme", () => {
+        const bogus = "md5_with_rsa" as unknown as SignatureScheme;
+        expect(() => signatureSchemeToWire(bogus)).toThrow(/Unexpected value/);
+    });
+
+    it("namedGroupToWire hits the default branch for an unrecognised group", () => {
+        const bogus = "frobnitz" as unknown as NamedGroup;
+        expect(() => namedGroupToWire(bogus)).toThrow(/Unexpected value/);
+    });
+});
+
