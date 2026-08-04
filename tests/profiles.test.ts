@@ -23,11 +23,13 @@ describe("profiles registry", () => {
         expect(MODERN_TLS13_PROFILE.config.cipherSuites).toContain("TLS_AES_128_GCM_SHA256");
     });
 
-    it("exposes the compatibility profile with a TLS 1.2 fallback", () => {
+    it("exposes the compatibility profile with TLS 1.3 only (broader suites/groups)", () => {
         expect(COMPATIBILITY_PROFILE.name).toBe("compatibility");
         const wires = COMPATIBILITY_PROFILE.config.supportedVersions.map((v) => v.wire);
-        expect(wires).toContain(0x0304); // TLS 1.3
-        expect(wires).toContain(0x0303); // TLS 1.2
+        expect(wires).toEqual([0x0304]); // TLS 1.3 only — this client does not negotiate TLS 1.2.
+        // Broader key-share groups and signature algorithms than the modern profile.
+        expect(COMPATIBILITY_PROFILE.config.keyShareGroups).toContain("secp384r1");
+        expect(COMPATIBILITY_PROFILE.config.signatureAlgorithms).toContain("ecdsa_secp384r1_sha384");
     });
 
     it("registers every profile by name", () => {
