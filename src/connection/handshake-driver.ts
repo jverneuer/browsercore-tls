@@ -14,7 +14,7 @@
  */
 
 import type { Transport } from "@browsercore/transport";
-import type { HashId } from "@browsercore/crypto";
+import type { CryptoProvider, HashId } from "@browsercore/crypto";
 import { TlsHandshakeError } from "../errors.js";
 import { ContentType, cipherSuiteToAead } from "../record/record.js";
 import {
@@ -67,6 +67,8 @@ import {
  */
 export interface HandshakeContext {
     readonly transport: Transport;
+    /** Cryptographic provider (defaults to the @browsercore/crypto singleton). */
+    crypto: CryptoProvider;
     /** Mutable: buffered bytes not yet consumed by the record framer. */
     readBuffer: Uint8Array;
     /** Mutable: running transcript of full handshake messages. */
@@ -132,7 +134,7 @@ export async function runHandshake(
     const keyPairs = await generateKeyShares(desired);
 
     // 2. Build and send the ClientHello as a plaintext handshake record.
-    const clientHello = buildClientHello(profile, keyPairs);
+    const clientHello = buildClientHello(profile, keyPairs, ctx.crypto);
     ctx.transcript.push(clientHello);
     await writeRecord(ctx.transport, ContentType.HANDSHAKE, clientHello);
 
@@ -156,30 +158,31 @@ export async function runHandshake(
     applyNegotiation(ctx);
 
     // 4. (EC)DHE key exchange.
-    const sharedSecret = computeSharedSecret(serverHello, keyPairs);
+    const sharedSecret = computeSharedSecret(serverHello, keyPairs, ctx.crypto)
 
     // 5. Derive handshake traffic secrets from the ClientHello..ServerHello transcript.
-    const helloTranscript = transcriptHash(ctx.transcript, ctx.hash);
+    const helloTranscript = transcriptHash(ctx.transcript, ctx.hash, ctx.crypto)
     const { masterSecret, clientTrafficSecret, serverTrafficSecret } = deriveHandshakeTrafficSecrets(
         sharedSecret,
         helloTranscript,
         ctx.cipherSuite,
+        ctx.crypto,
     );
     ctx.masterSecret = masterSecret;
     ctx.clientHsTrafficSecret = clientTrafficSecret;
     ctx.serverHsTrafficSecret = serverTrafficSecret;
-    ctx.clientHsTraffic = deriveTrafficSecrets(clientTrafficSecret, ctx.cipherSuite, ctx.hash);
-    ctx.serverHsTraffic = deriveTrafficSecrets(serverTrafficSecret, ctx.cipherSuite, ctx.hash);
+    ctx.clientHsTraffic = deriveTrafficSecrets(clientTrafficSecret, ctx.cipherSuite, ctx.hash, ctx.crypto)
+    ctx.serverHsTraffic = deriveTrafficSecrets(serverTrafficSecret, ctx.cipherSuite, ctx.hash, ctx.crypto)
 
     // 6. Consume the server's encrypted flight.
     await consumeServerFlight(ctx, serverName, trustAnchors, now);
 
     // 7. Derive application traffic secrets from the full transcript.
-    const handshakeTranscript = transcriptHash(ctx.transcript, ctx.hash);
-    const applicationSecrets = deriveApplicationSecrets(ctx.masterSecret, handshakeTranscript, ctx.cipherSuite);
+    const handshakeTranscript = transcriptHash(ctx.transcript, ctx.hash, ctx.crypto)
+    const applicationSecrets = deriveApplicationSecrets(ctx.masterSecret, handshakeTranscript, ctx.cipherSuite, ctx.crypto)
 
     // 8. Send the client Finished under the client handshake traffic key.
-    const finishedMessage = buildClientFinishedMessage(ctx.hash, ctx.clientHsTrafficSecret, ctx.transcript);
+    const finishedMessage = buildClientFinishedMessage(ctx.hash, ctx.clientHsTrafficSecret, ctx.transcript, ctx.crypto)
     writeEncryptedRecord(
         ctx.transport,
         ctx.aead,
@@ -187,6 +190,7 @@ export async function runHandshake(
         ContentType.HANDSHAKE,
         finishedMessage,
         ctx.clientHsSeq,
+        ctx.crypto,
     );
     ctx.clientHsSeq++;
 
@@ -209,6 +213,7 @@ async function consumeServerFlight(
     // EncryptedExtensions.
     let message = await readEncryptedHandshakeMessage(
         ctx.readBuffer, ctx.transport, ctx.aead, ctx.serverHsTraffic, ctx.serverHsSeq,
+    ctx.crypto,
     );
     ctx.readBuffer = message.readBuffer;
     ctx.serverHsSeq++;
@@ -222,6 +227,7 @@ async function consumeServerFlight(
     // Certificate.
     message = await readEncryptedHandshakeMessage(
         ctx.readBuffer, ctx.transport, ctx.aead, ctx.serverHsTraffic, ctx.serverHsSeq,
+    ctx.crypto,
     );
     ctx.readBuffer = message.readBuffer;
     ctx.serverHsSeq++;
@@ -233,6 +239,7 @@ async function consumeServerFlight(
     // CertificateVerify.
     message = await readEncryptedHandshakeMessage(
         ctx.readBuffer, ctx.transport, ctx.aead, ctx.serverHsTraffic, ctx.serverHsSeq,
+    ctx.crypto,
     );
     ctx.readBuffer = message.readBuffer;
     ctx.serverHsSeq++;
@@ -243,6 +250,7 @@ async function consumeServerFlight(
     const finishedTranscript = transcriptHash(ctx.transcript, ctx.hash);
     message = await readEncryptedHandshakeMessage(
         ctx.readBuffer, ctx.transport, ctx.aead, ctx.serverHsTraffic, ctx.serverHsSeq,
+    ctx.crypto,
     );
     ctx.readBuffer = message.readBuffer;
     ctx.serverHsSeq++;

@@ -9,7 +9,7 @@
  * them together.
  */
 
-import { crypto, type HashId } from "@browsercore/crypto";
+import { crypto, type CryptoProvider, type HashId } from "@browsercore/crypto";
 import type { KeyPair } from "../types.js";
 import type { ServerHello } from "../handshake/handshake.js";
 import { TlsHandshakeError } from "../errors.js";
@@ -18,7 +18,7 @@ import { hkdfExpandLabel, hashLengthFor } from "../crypto/keySchedule.js";
 import { assertNever, constantTimeEqual } from "../utils.js";
 
 /** Compute the (EC)DHE shared secret from the server's selected key share. */
-export function computeSharedSecret(serverHello: ServerHello, keyPairs: readonly KeyPair[]): Uint8Array {
+export function computeSharedSecret(serverHello: ServerHello, keyPairs: readonly KeyPair[], provider: CryptoProvider = crypto): Uint8Array {
     const extensions = parseExtensions(serverHello.extensions);
     const keyShare = findExtension(extensions, ExtensionType.KEY_SHARE);
     if (keyShare === undefined) {
@@ -59,10 +59,10 @@ export function computeSharedSecret(serverHello: ServerHello, keyPairs: readonly
     }
     switch (group) {
         case "x25519":
-            return crypto.x25519SharedSecret(myPair.privateKey, serverPublicKey);
+            return provider.x25519SharedSecret(myPair.privateKey, serverPublicKey);
         case "secp256r1":
         case "secp384r1":
-            return crypto.ecdhSharedSecret(group, myPair.privateKey, serverPublicKey);
+            return provider.ecdhSharedSecret(group, myPair.privateKey, serverPublicKey);
         case "x448":
             // @browsercore/crypto only exposes X25519 and the two NIST ECDH
             // curves today. Other (EC)DHE groups would need a backend we do not
@@ -77,14 +77,14 @@ export function computeSharedSecret(serverHello: ServerHello, keyPairs: readonly
 }
 
 /** Hash the current handshake transcript with the negotiated cipher's hash. */
-export function transcriptHash(transcript: readonly Uint8Array[], hash: HashId): Uint8Array {
+export function transcriptHash(transcript: readonly Uint8Array[], hash: HashId, provider: CryptoProvider = crypto): Uint8Array {
     const blob = transcript.reduce((acc, msg) => {
         const next = new Uint8Array(acc.length + msg.length);
         next.set(acc, 0);
         next.set(msg, acc.length);
         return next;
     }, new Uint8Array(0));
-    return hash === "SHA-384" ? crypto.sha384(blob) : crypto.sha256(blob);
+    return hash === "SHA-384" ? provider.sha384(blob) : provider.sha256(blob);
 }
 
 /**
@@ -97,6 +97,7 @@ export function verifyServerFinished(
     transcript: Uint8Array,
     hash: HashId,
     serverHsTrafficSecret: Uint8Array,
+    provider: CryptoProvider = crypto,
 ): void {
     const hashLen = hashLengthFor(hash);
     if (body.length !== hashLen) {
@@ -105,7 +106,7 @@ export function verifyServerFinished(
         });
     }
     const finishedKey = hkdfExpandLabel(serverHsTrafficSecret, "finished", new Uint8Array(0), hashLen, hash);
-    const expected = crypto.hmac(hash, finishedKey, transcript);
+    const expected = provider.hmac(hash, finishedKey, transcript);
     if (!constantTimeEqual(body, expected)) {
         throw new TlsHandshakeError("finished", {
             cause: new Error("server Finished verify_data mismatch"),

@@ -9,6 +9,10 @@
 export { connectTls, TlsConnectionImpl, generateKeyShares } from "./tls.js";
 export type { TlsConnection } from "./types.js";
 
+// Re-export the CryptoProvider type so consumers can inject a custom provider
+// via TlsOptions without importing @browsercore/crypto directly.
+export type { CryptoProvider } from "@browsercore/crypto";
+
 export {
     TlsError,
     TlsHandshakeError,
