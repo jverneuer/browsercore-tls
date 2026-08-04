@@ -4,7 +4,9 @@
 [![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jverneuer/browsercore-tls/coverage/coverage/badge.json)](https://github.com/jverneuer/browsercore-tls/blob/main/COVERAGE.md)
 [![lint](https://img.shields.io/github/actions/workflow/status/jverneuer/browsercore-tls/ci.yml?label=lint)](https://github.com/jverneuer/browsercore-tls/actions/workflows/ci.yml)
 
-A TLS 1.3 (and 1.2 fallback) client implemented entirely in TypeScript.
+A TLS 1.3 client implemented entirely in TypeScript. TLS 1.2 fallback is
+intentionally not implemented — requesting a TLS 1.2-only handshake is rejected
+up front with a typed error rather than failing silently mid-flight.
 
 ## Responsibility
 
@@ -70,8 +72,47 @@ await tls.close();
   └─ @browsercore/crypto
 ```
 
-No other `@browsercore/*` packages are imported at runtime. Shared build, lint,
+No other `@browsercore/*` packages are imported. Shared build, lint,
 and test config comes from `@browsercore/dev` (see [Development](#development)).
+
+## Architecture
+
+The package is a thin coordinator + focused pure-function modules. The
+connection class (`TlsConnectionImpl`) owns mutable state (read buffer,
+transcript, traffic secrets, sequence counters) and the public surface
+(`handshake` / `read` / `write` / `close` / `on`). Every byte-level computation
+lives in a module under `src/connection/` and is written as functions over
+explicit inputs, so the protocol logic is unit-testable without a live
+connection.
+
+| Module | Responsibility |
+| --- | --- |
+| `src/record/record.ts` | Record header parse/serialize, AEAD encrypt/decrypt (delegates to `@browsercore/crypto`) |
+| `src/handshake/client-hello.ts` | ClientHello builder (SNI, supported_versions, key_share, signature_algorithms, ALPN) |
+| `src/handshake/server-hello.ts` | ServerHello parser — validates cipher suite + version |
+| `src/handshake/state-machine.ts` | Handshake phase state machine with phase-tagged errors |
+| `src/crypto/keySchedule.ts` | TLS 1.3 key schedule (RFC 8446 §7.1): HKDF-Expand-Label, traffic secrets |
+| `src/certificates/` | X.509 DER parse, hostname validation (RFC 6125), chain verification |
+| `src/extensions/` | Extension types, parsers, and wire encoders |
+| `src/connection/handshake-driver.ts` | Handshake choreography (what to send, what to read, when to derive) |
+| `src/connection/record-layer.ts` | TLS 1.3 inner-content-type wrapping, nonce XOR, record framing |
+| `src/connection/key-exchange.ts` | (EC)DHE shared secret, transcript hash, server Finished verification |
+| `src/connection/handshake-messages.ts` | EncryptedExtensions/Certificate/Finished parsing, client Finished builder |
+| `src/connection/lifecycle.ts` | Timeouts, alerts, state transitions, post-handshake record dispatch |
+
+Errors all carry a `kind` discriminator so callers can narrow and inspect
+without leaking backend specifics (`TlsHandshakeError(phase)`,
+`TlsDecryptError`, `TlsAlertError(level, description)`).
+
+## Not implemented
+
+- TLS 1.2 fallback — the client speaks TLS 1.3 only
+- Post-handshake messages (NewSessionTicket, KeyUpdate)
+- Session resumption / PSK / 0-RTT
+- Mutual TLS (client certificate)
+- Certificate compression
+- HelloRetryRequest
+- Additional key-share groups beyond X25519
 
 ## Development
 
