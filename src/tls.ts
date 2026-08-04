@@ -81,6 +81,16 @@ export function generateKeyShares(groups: readonly string[]): Promise<KeyPair[]>
         const shares: KeyPair[] = [];
         for (const group of groups) {
             switch (group) {
+                // Post-quantum hybrid groups (RFC 8446 §4.2.7 + hybrid design).
+                // Advertised in supported_groups but we send the classical
+                // X25519 key_share — matching real Chrome hybrid mode. The
+                // server combines it with its own PQ share if it supports the
+                // hybrid group, so no separate PQ key pair is generated here.
+                // These empty cases fall through to the x25519 case below.
+                case "X25519Kyber768":
+                case "X25519MLKEM768":
+                case "Secp256r1MLKEM768":
+                case "Secp384r1MLKEM1024":
                 case "x25519": {
                     const kp = crypto.x25519GenerateKeyPair();
                     shares.push({ algorithm: "x25519", privateKey: kp.secretKey, publicKey: kp.publicKey });
