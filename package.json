@@ -40,14 +40,14 @@
         "typescript": "^7.0.0",
         "vitest": "^4.1.10",
         "oxlint": "^1.76.0",
-        "oxlint-tsgolint": "7.0.2001"
+        "oxlint-tsgolint": "7.0.2001",
+        "@browsercore/crypto": "0.2.0"
     },
     "publishConfig": {
         "access": "public",
         "registry": "https://registry.npmjs.org/"
     },
     "dependencies": {
-        "@browsercore/crypto": "0.2.0",
         "@browsercore/transport": "0.2.0"
     },
     "engines": {

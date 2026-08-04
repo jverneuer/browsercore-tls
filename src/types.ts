@@ -6,6 +6,7 @@
  * but NEVER imports node:crypto directly — that boundary is @browsercore/crypto's job.
  */
 
+import type { CryptoProvider } from "@browsercore/crypto";
 import type { StreamTransport } from "@browsercore/transport";
 import type { TlsError } from "./errors.js";
 
@@ -219,6 +220,12 @@ export interface TlsOptions {
      * or a custom implementation to observe handshake / lifecycle events.
      */
     readonly logger?: Logger;
+    /**
+     * Cryptographic provider. Defaults to the @browsercore/crypto singleton
+     * (NodeCryptoProvider). Inject a custom provider for testing or to swap
+     * the backend (WebCrypto, HSM).
+     */
+    readonly crypto?: CryptoProvider;
 }
 
 /**

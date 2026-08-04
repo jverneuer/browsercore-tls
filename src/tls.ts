@@ -20,7 +20,7 @@
  * this file focused on the public surface.
  */
 
-import { crypto, type HashId } from "@browsercore/crypto";
+import { crypto, type CryptoProvider, type HashId } from "@browsercore/crypto";
 import type { StreamTransport } from "@browsercore/transport";
 import {
     systemClock,
@@ -72,13 +72,14 @@ const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
  * groups, signature algorithms).
  */
 export async function connectTls(options: TlsOptions): Promise<TlsConnection> {
-    const conn = new TlsConnectionImpl(options);
+    const provider = options.crypto ?? crypto;
+    const conn = new TlsConnectionImpl(options, provider);
     await conn.handshake();
     return conn;
 }
 
 /** Generate key shares for the requested groups (delegates to @browsercore/crypto). */
-export function generateKeyShares(groups: readonly string[]): Promise<KeyPair[]> {
+export function generateKeyShares(groups: readonly string[], provider: CryptoProvider = crypto): Promise<KeyPair[]> {
     // Wrapped in .then() so a synchronous throw (unsupported group) becomes a
     // rejected promise — callers await this and tests assert with .rejects.
     return Promise.resolve().then(() => {
@@ -86,13 +87,13 @@ export function generateKeyShares(groups: readonly string[]): Promise<KeyPair[]>
         for (const group of groups) {
             switch (group) {
                 case "x25519": {
-                    const kp = crypto.x25519GenerateKeyPair();
+                    const kp = provider.x25519GenerateKeyPair();
                     shares.push({ algorithm: "x25519", privateKey: kp.secretKey, publicKey: kp.publicKey });
                     break;
                 }
                 case "secp256r1":
                 case "secp384r1": {
-                    const kp = crypto.ecdhGenerateKeyPair(group);
+                    const kp = provider.ecdhGenerateKeyPair(group);
                     shares.push({ algorithm: group, privateKey: kp.secretKey, publicKey: kp.publicKey });
                     break;
                 }
@@ -142,6 +143,8 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
     private readonly clock: Clock;
     /** Logging sink (defaults to silentLogger). Injected via TlsOptions. */
     private readonly logger: Logger;
+    /** Cryptographic provider (defaults to the @browsercore/crypto singleton). */
+    public readonly crypto!: CryptoProvider;
 
     // --- HandshakeContext: mutable handshake state (read/written by the driver) ---
     public readBuffer: Uint8Array = new Uint8Array(0);
@@ -171,7 +174,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
     // `options` is optional so a connection can be constructed in isolation (e.g.
     // to assert on its default public fields) without a live transport. The real
     // entry point, connectTls, always supplies a full options object.
-    constructor(options?: TlsOptions) {
+    constructor(options?: TlsOptions, provider: CryptoProvider = crypto) {
         // The clock defaults to the wall clock so production code never needs to
         // supply one. Assigned here (before the options guard) so both the no-arg
         // and full-options paths share the same default.
@@ -180,6 +183,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
         // they opt in. Assigned here so both the no-arg and full-options paths
         // share the same default.
         this.logger = options?.logger ?? silentLogger;
+        this.crypto = provider;
         if (options !== undefined) {
             this.transport = options.transport;
             this.serverName = options.serverName;
@@ -238,6 +242,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
                 this.aead,
                 this.applicationSecrets.server,
                 this.serverAppSeq,
+                this.crypto,
             );
             this.readBuffer = readBuffer;
             this.serverAppSeq++;
@@ -264,6 +269,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
                     ContentType.APPLICATION_DATA,
                     fragment,
                     this.clientAppSeq,
+                    this.crypto,
                 );
                 this.clientAppSeq++;
             }
@@ -290,6 +296,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
                     ContentType.ALERT,
                     alert,
                     this.clientAppSeq,
+                    this.crypto,
                 );
             } catch {
                 // ignore — we are closing anyway
@@ -331,7 +338,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
             this.profile,
             this.serverName,
             this.trustAnchors,
-            generateKeyShares,
+            (groups) => generateKeyShares(groups, this.crypto),
             now,
         );
         // Expose the negotiated parameters the driver wrote onto the context.

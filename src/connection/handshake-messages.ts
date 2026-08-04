@@ -9,7 +9,7 @@
  * record layer and the handshake state machine.
  */
 
-import { crypto, type HashId } from "@browsercore/crypto";
+import { crypto, type CryptoProvider, type HashId } from "@browsercore/crypto";
 import type { StreamTransport } from "@browsercore/transport";
 import type { TrafficSecrets } from "../types.js";
 import { TlsHandshakeError } from "../errors.js";
@@ -130,10 +130,11 @@ export function buildClientFinishedMessage(
     hash: HashId,
     clientHsTrafficSecret: Uint8Array,
     transcript: readonly Uint8Array[],
+    provider: CryptoProvider = crypto,
 ): Uint8Array {
     const hashLen = hashLengthFor(hash);
-    const finishedKey = hkdfExpandLabel(clientHsTrafficSecret, "finished", new Uint8Array(0), hashLen, hash);
-    const verifyData = crypto.hmac(hash, finishedKey, transcriptHash(transcript, hash));
+    const finishedKey = hkdfExpandLabel(clientHsTrafficSecret, "finished", new Uint8Array(0), hashLen, hash, provider);
+    const verifyData = provider.hmac(hash, finishedKey, transcriptHash(transcript, hash))
     const message = new Uint8Array(4 + verifyData.length);
     message[0] = 20; // HandshakeType.FINISHED
     message[1] = (verifyData.length >> 16) & 0xff;
@@ -154,8 +155,9 @@ export async function readEncryptedHandshakeMessage(
     aead: Parameters<typeof encryptRecord>[4],
     traffic: TrafficSecrets,
     seq: number,
+    provider: CryptoProvider = crypto,
 ): Promise<{ whole: Uint8Array; body: Uint8Array; readBuffer: Uint8Array }> {
-    const header = await readHeaderBytesFromRecord(readBuffer, transport);
+    const header = await readHeaderBytesFromRecord(readBuffer, transport)
     const record = await readRawRecordFromRecord(header.readBuffer, transport, header);
     if (record.type !== ContentType.APPLICATION_DATA) {
         throw new TlsHandshakeError("finished", {
@@ -163,7 +165,7 @@ export async function readEncryptedHandshakeMessage(
         });
     }
     const nonce = xorNonce(traffic.iv, seq);
-    const plaintext = decryptRecord(record.fragment, traffic.key, nonce, header.raw, aead);
+    const plaintext = decryptRecord(record.fragment, traffic.key, nonce, header.raw, aead, provider);
     // plaintext = content || innerType || optional zero padding. Find the type.
     let end = plaintext.length;
     while (end > 0 && plaintext[end - 1] === 0) {

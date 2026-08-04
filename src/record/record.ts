@@ -6,7 +6,7 @@
  * payload is delegated to @browsercore/crypto — this module owns framing only.
  */
 
-import { crypto } from "@browsercore/crypto";
+import { crypto, type CryptoProvider } from "@browsercore/crypto";
 import type { AeadAlgorithm, CipherSuite } from "../types.js";
 import { NotImplementedError, TlsDecryptError } from "../errors.js";
 import { assertNever } from "../utils.js";
@@ -188,16 +188,17 @@ export function encryptRecord(
     nonce: Uint8Array,
     additionalData: Uint8Array,
     algorithm: AeadAlgorithm,
+    provider: CryptoProvider = crypto,
 ): Uint8Array {
     switch (algorithm) {
         case "AES-128-GCM":
-            return crypto.aes128GcmEncrypt(key, nonce, plaintext, additionalData);
+            return provider.aes128GcmEncrypt(key, nonce, plaintext, additionalData);
         case "AES-256-GCM":
-            return crypto.aes256GcmEncrypt(key, nonce, plaintext, additionalData);
+            return provider.aes256GcmEncrypt(key, nonce, plaintext, additionalData);
         case "AES-128-CCM":
-            return crypto.aes128CcmEncrypt(key, nonce, plaintext, additionalData);
+            return provider.aes128CcmEncrypt(key, nonce, plaintext, additionalData);
         case "CHACHA20-POLY1305":
-            return crypto.chacha20Poly1305Encrypt(key, nonce, plaintext, additionalData);
+            return provider.chacha20Poly1305Encrypt(key, nonce, plaintext, additionalData);
         default:
             return assertNever(algorithm);
     }
@@ -222,17 +223,18 @@ export function decryptRecord(
     nonce: Uint8Array,
     additionalData: Uint8Array,
     algorithm: AeadAlgorithm,
+    provider: CryptoProvider = crypto,
 ): Uint8Array {
     try {
         switch (algorithm) {
             case "AES-128-GCM":
-                return crypto.aes128GcmDecrypt(key, nonce, ciphertext, additionalData);
+                return provider.aes128GcmDecrypt(key, nonce, ciphertext, additionalData);
             case "AES-256-GCM":
-                return crypto.aes256GcmDecrypt(key, nonce, ciphertext, additionalData);
+                return provider.aes256GcmDecrypt(key, nonce, ciphertext, additionalData);
             case "AES-128-CCM":
-                return crypto.aes128CcmDecrypt(key, nonce, ciphertext, additionalData);
+                return provider.aes128CcmDecrypt(key, nonce, ciphertext, additionalData);
             case "CHACHA20-POLY1305":
-                return crypto.chacha20Poly1305Decrypt(key, nonce, ciphertext, additionalData);
+                return provider.chacha20Poly1305Decrypt(key, nonce, ciphertext, additionalData);
             default:
                 return assertNever(algorithm);
         }

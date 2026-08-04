@@ -14,6 +14,7 @@
  */
 
 import type { StreamTransport } from "@browsercore/transport";
+import { crypto, type CryptoProvider } from "@browsercore/crypto";
 import type { TrafficSecrets } from "../types.js";
 import { TlsDecryptError, TlsHandshakeError } from "../errors.js";
 import { ContentType, decryptRecord, encryptRecord, parseRecordHeader, readContentType, serializeRecordHeader } from "../record/record.js";
@@ -114,6 +115,7 @@ export async function readEncryptedRecord(
     aead: Parameters<typeof encryptRecord>[4],
     traffic: TrafficSecrets,
     seq: number,
+    provider: CryptoProvider = crypto,
 ): Promise<{ innerType: ContentType; content: Uint8Array; readBuffer: Uint8Array }> {
     const header = await readHeaderBytes(readBuffer, transport);
     const record = await readRawRecord(header.readBuffer, transport, header);
@@ -123,7 +125,7 @@ export async function readEncryptedRecord(
         });
     }
     const nonce = xorNonce(traffic.iv, seq);
-    const plaintext = decryptRecord(record.fragment, traffic.key, nonce, header.raw, aead);
+    const plaintext = decryptRecord(record.fragment, traffic.key, nonce, header.raw, aead, provider)
     // plaintext = content || innerType || optional zero padding. Find the type.
     let end = plaintext.length;
     while (end > 0 && plaintext[end - 1] === 0) {
@@ -161,10 +163,11 @@ export function writeEncryptedRecord(
     innerType: ContentType,
     content: Uint8Array,
     seq: number,
+    provider: CryptoProvider = crypto,
 ): void {
     const plaintext = concat(content, new Uint8Array([innerType]));
     const header = serializeRecordHeader(ContentType.APPLICATION_DATA, plaintext.length + AEAD_TAG_LENGTH);
     const nonce = xorNonce(traffic.iv, seq);
-    const ciphertext = encryptRecord(plaintext, traffic.key, nonce, header, aead);
+    const ciphertext = encryptRecord(plaintext, traffic.key, nonce, header, aead, provider)
     void transport.write(concat(header, ciphertext));
 }
