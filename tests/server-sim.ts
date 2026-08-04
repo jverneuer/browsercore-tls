@@ -122,13 +122,22 @@ export class TlsServerSim {
         const ks = findExtension(extensions, ExtensionType.KEY_SHARE);
         if (ks === undefined) throw new Error("ClientHello has no key_share extension");
         // Client key_share: client_shares_len(2) || share { group(2), len(2), key }.
-        // ks.data starts with the 2-byte client_shares_len.
-        const shareLen = (ks.data[0]! << 8) | ks.data[1]!;
-        void shareLen;
-        const group = (ks.data[2]! << 8) | ks.data[3]!;
-        const keyLen = (ks.data[4]! << 8) | ks.data[5]!;
-        void group;
-        return ks.data.subarray(6, 6 + keyLen);
+        // ks.data starts with the 2-byte client_shares_len. Real browsers may
+        // prepend a GREASE key-share entry (group 0x0a0a), so we must scan for the
+        // real X25519 (0x001d) group rather than blindly reading the first share.
+        const data = ks.data;
+        const sharesLen = (data[0]! << 8) | data[1]!;
+        let s = 2;
+        const end = 2 + sharesLen;
+        while (s + 4 <= end) {
+            const group = (data[s]! << 8) | data[s + 1]!;
+            const keyLen = (data[s + 2]! << 8) | data[s + 3]!;
+            if (group === 0x001d) {
+                return data.subarray(s + 4, s + 4 + keyLen);
+            }
+            s += 4 + keyLen;
+        }
+        throw new Error("ClientHello key_share has no X25519 (0x001d) entry");
     }
 
     /** Build the ServerHello handshake message (type + length + body). */

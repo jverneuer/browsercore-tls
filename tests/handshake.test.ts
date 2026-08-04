@@ -289,37 +289,47 @@ describe("buildClientHello edge cases", () => {
 
     const baseConfig: ClientHelloConfig = {
         cipherSuites: ["TLS_AES_128_GCM_SHA256"],
+        extensionOrder: [
+            0, 10, 11, 13, 16, 17513, 18, 23, 27, 35, 41, 43, 45, 5, 51, 65281,
+        ],
         keyShareGroups: ["x25519"],
         signatureAlgorithms: ["ecdsa_secp256r1_sha256"],
         supportedVersions: [TLS_1_3],
         serverName: "example.com",
+        grease: true,
     };
 
-    it("omits the ALPN extension when alpnProtocols is undefined", async () => {
+    it("emits an empty ALPN body when alpnProtocols is undefined", async () => {
         const kps = await keyPairs(["x25519"]);
         const hello = buildClientHello(baseConfig, kps);
-        // The extensions block should not contain ALPN (type 16). Walk the
-        // structure from the front to locate the length-prefixed extensions, then
-        // assert no ALPN type appears.
+        // ALPN (type 16) is in the profile's extension order, so the extension
+        // IS emitted — but with an empty body when no protocols are configured.
         const extBlock = extractClientHelloExtensions(hello);
         const parsed = parseExtensionsForTest(extBlock);
-        expect(parsed.some((e) => e.type === ExtensionType.APPLICATION_LAYER_PROTOCOL_NEGOTIATION)).toBe(false);
+        const alpn = parsed.find((e) => e.type === ExtensionType.APPLICATION_LAYER_PROTOCOL_NEGOTIATION);
+        expect(alpn).toBeDefined();
+        expect(alpn!.data.length).toBe(0);
     });
 
-    it("omits the ALPN extension when alpnProtocols is an empty array", async () => {
+    it("emits an empty ALPN body when alpnProtocols is an empty array", async () => {
         const kps = await keyPairs(["x25519"]);
         const hello = buildClientHello({ ...baseConfig, alpnProtocols: [] }, kps);
         const extBlock = extractClientHelloExtensions(hello);
         const parsed = parseExtensionsForTest(extBlock);
-        expect(parsed.some((e) => e.type === ExtensionType.APPLICATION_LAYER_PROTOCOL_NEGOTIATION)).toBe(false);
+        const alpn = parsed.find((e) => e.type === ExtensionType.APPLICATION_LAYER_PROTOCOL_NEGOTIATION);
+        expect(alpn).toBeDefined();
+        expect(alpn!.data.length).toBe(0);
     });
 
-    it("includes the ALPN extension when alpnProtocols is non-empty", async () => {
+    it("emits a populated ALPN body when alpnProtocols is non-empty", async () => {
         const kps = await keyPairs(["x25519"]);
         const hello = buildClientHello({ ...baseConfig, alpnProtocols: ["h2"] }, kps);
         const extBlock = extractClientHelloExtensions(hello);
         const parsed = parseExtensionsForTest(extBlock);
-        expect(parsed.some((e) => e.type === ExtensionType.APPLICATION_LAYER_PROTOCOL_NEGOTIATION)).toBe(true);
+        const alpn = parsed.find((e) => e.type === ExtensionType.APPLICATION_LAYER_PROTOCOL_NEGOTIATION);
+        expect(alpn).toBeDefined();
+        // Body is non-empty: it carries the "h2" protocol id.
+        expect(alpn!.data.length).toBeGreaterThan(0);
     });
 
     it("builds a ClientHello with an empty serverName", async () => {

@@ -19,7 +19,12 @@ export interface TlsProfile {
     readonly config: ClientHelloConfig;
 }
 
-/** TLS 1.3 only, modern ciphers, X25519 + secp256r1 key shares. */
+/**
+ * TLS 1.3 only, modern ciphers, X25519 + secp256r1 key shares.
+ *
+ * Extension order mirrors chrome-140's GREASE-inclusive layout so this
+ * placeholder profile exercises the full order-driven extension path.
+ */
 export const MODERN_TLS13_PROFILE: TlsProfile = {
     name: "modern-tls13",
     config: {
@@ -27,6 +32,9 @@ export const MODERN_TLS13_PROFILE: TlsProfile = {
             "TLS_AES_256_GCM_SHA384",
             "TLS_AES_128_GCM_SHA256",
             "TLS_CHACHA20_POLY1305_SHA256",
+        ],
+        extensionOrder: [
+            0, 10, 11, 13, 16, 17513, 18, 23, 27, 35, 41, 43, 45, 5, 51, 65281,
         ],
         keyShareGroups: ["x25519", "secp256r1"],
         signatureAlgorithms: [
@@ -36,6 +44,7 @@ export const MODERN_TLS13_PROFILE: TlsProfile = {
         ],
         supportedVersions: [{ name: "TLS 1.3", wire: 0x0304 }],
         serverName: "",
+        grease: true,
     },
 };
 
@@ -53,6 +62,8 @@ export const COMPATIBILITY_PROFILE: TlsProfile = {
             "TLS_AES_128_GCM_SHA256",
             "TLS_CHACHA20_POLY1305_SHA256",
         ],
+        // Firefox-128 style order: no GREASE, no session_ticket/renegotiation_info.
+        extensionOrder: [0, 10, 11, 13, 16, 18, 23, 35, 41, 43, 45, 51, 65281],
         keyShareGroups: ["x25519", "secp256r1", "secp384r1"],
         signatureAlgorithms: [
             "ecdsa_secp256r1_sha256",
@@ -62,6 +73,7 @@ export const COMPATIBILITY_PROFILE: TlsProfile = {
         ],
         supportedVersions: [{ name: "TLS 1.3", wire: 0x0304 }],
         serverName: "",
+        grease: false,
     },
 };
 
