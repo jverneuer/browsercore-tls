@@ -70,7 +70,7 @@ jobs:
             echo "coverage report unchanged — nothing to commit"
           else
             git commit -m "ci: update coverage report [skip ci]"
-            git push
+            git push origin HEAD:coverage --force-with-lease
           fi
 
       - name: Publish to npm
