@@ -27,11 +27,11 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint -- --deny-warnings
       - run: npm test -- --coverage
-      - name: Enforce >=90% line coverage
+      - name: Enforce >=95% line coverage
         run: |
-          node -e "const t=require('./coverage/coverage-summary.json').total;const p=t.lines.pct;if(p<90){console.error('Line coverage '+p+'% < 90% threshold');process.exit(1)}console.log('Line coverage '+p+'% >= 90% OK')"
+          node -e "const t=require('./coverage/coverage-summary.json').total;const p=t.lines.pct;if(p<95){console.error('Line coverage '+p+'% < 95% threshold');process.exit(1)}console.log('Line coverage '+p+'% >= 95% OK')"
       - name: Generate COVERAGE.md
-        run: node scripts/coverage-md.mjs
+        run: npx coverage-md
       - run: npm run build
 
       # Determine whether this push changed the package version vs. the previous
