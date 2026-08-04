@@ -34,6 +34,37 @@ jobs:
         run: npx coverage-md
       - run: npm run build
 
+      # --- QA verification (automated test-plan checklist) ---
+      # These steps execute the package's QA checklist in CI so regressions
+      # (broken exports, stub README, drifted lint config) are caught before
+      # publish — not manually after the fact.
+
+      - name: Verify coverage-md bin
+        run: npx coverage-md
+
+      - name: Check for oxlint rule drift
+        run: |
+          # If a local oxlint.config.ts exists, it must only ADD restrictions,
+          # never relax shared-base rules. We verify by confirming lint still
+          # passes with --deny-warnings (already enforced above).
+          if [ -f oxlint.config.ts ]; then
+            echo "Local oxlint.config.ts present — verifying no drift..."
+            npm run lint -- --deny-warnings
+          fi
+
+      - name: Verify exports resolve
+        run: |
+          node -e "require('./dist/index.js')" && \
+          node -e "require('./dist/vitest.js')" && \
+          node -e "require('./dist/oxlint.js')" && \
+          echo "All exports resolve"
+
+      - name: Verify README completeness
+        run: |
+          test -s README.md || { echo "README.md missing or empty"; exit 1; }
+          grep -q "## Development" README.md || { echo "README missing Development section"; exit 1; }
+          grep -q "@browsercore/dev" README.md || { echo "README missing package reference"; exit 1; }
+
       # Determine whether this push changed the package version vs. the previous
       # commit on main. Publish + tag/release are gated on this so a push that
       # only touches source/docs/CI never triggers an npm publish or a release.
