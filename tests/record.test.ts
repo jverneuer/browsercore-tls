@@ -54,6 +54,8 @@ function keyNonceFor(algorithm: AeadAlgorithm): { key: Uint8Array; nonce: Uint8A
             return { key: crypto.randomBytes(16), nonce: crypto.randomBytes(12) };
         case "AES-256-GCM":
             return { key: crypto.randomBytes(32), nonce: crypto.randomBytes(12) };
+        case "AES-128-CCM":
+            return { key: crypto.randomBytes(16), nonce: crypto.randomBytes(12) };
         case "CHACHA20-POLY1305":
             return { key: crypto.randomBytes(32), nonce: crypto.randomBytes(12) };
     }
@@ -71,11 +73,10 @@ describe("cipherSuiteToAead", () => {
         }
     });
 
-    it("rejects the unimplemented AES-128-CCM suite instead of silently mapping it to GCM", () => {
-        // @browsercore/crypto exposes no AES-CCM primitive, so CCM is never offered.
-        // If it reached the AEAD mapper it must fail loudly rather than return
-        // AES-128-GCM (which would complete the handshake then fail every record).
-        expect(() => cipherSuiteToAead("TLS_AES_128_CCM_SHA256")).toThrow(/AES-128-CCM/);
+    it("maps the AES-128-CCM suite to its AEAD algorithm like the other TLS 1.3 suites", () => {
+        // AES-128-CCM is now backed by @browsercore/crypto (aes-128-ccm), so it maps
+        // to "AES-128-CCM" alongside the GCM and ChaCha20-Poly1305 suites.
+        expect(cipherSuiteToAead("TLS_AES_128_CCM_SHA256")).toBe("AES-128-CCM");
     });
 });
 
@@ -105,6 +106,16 @@ describe("encryptRecord / decryptRecord round-trip", () => {
         const aad = serializeRecordHeader(23, plaintext.length + 16);
         const ciphertext = encryptRecord(plaintext, key, nonce, aad, "CHACHA20-POLY1305");
         const recovered = decryptRecord(ciphertext, key, nonce, aad, "CHACHA20-POLY1305");
+        expect(recovered).toEqual(plaintext);
+    });
+
+    it("round-trips AES-128-CCM", () => {
+        const { key, nonce } = keyNonceFor("AES-128-CCM");
+        const plaintext = new TextEncoder().encode("hello aes-128-ccm");
+        const aad = serializeRecordHeader(23, plaintext.length + 16);
+        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-128-CCM");
+        expect(ciphertext.length).toBe(plaintext.length + 16); // + tag
+        const recovered = decryptRecord(ciphertext, key, nonce, aad, "AES-128-CCM");
         expect(recovered).toEqual(plaintext);
     });
 
@@ -159,9 +170,10 @@ describe("exhaustiveness guards (default -> assertNever)", () => {
         const { key, nonce } = keyNonceFor("AES-128-GCM");
         const plaintext = new TextEncoder().encode("x");
         const aad = serializeRecordHeader(23, plaintext.length + 16);
-        // "AES-128-CCM" is not a valid AeadAlgorithm, but at runtime the switch
-        // only sees a string — this exercises the exhaustiveness default.
-        const bad = "AES-128-CCM" as unknown as AeadAlgorithm;
+        // "AES-128-OCB" is not a valid AeadAlgorithm (not in the union), but at
+        // runtime the switch only sees a string — this exercises the
+        // exhaustiveness default.
+        const bad = "AES-128-OCB" as unknown as AeadAlgorithm;
         expect(() => encryptRecord(plaintext, key, nonce, aad, bad)).toThrow(/Unexpected value/);
     });
 
@@ -170,7 +182,7 @@ describe("exhaustiveness guards (default -> assertNever)", () => {
         const plaintext = new TextEncoder().encode("x");
         const aad = serializeRecordHeader(23, plaintext.length + 16);
         const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-128-GCM");
-        const bad = "AES-128-CCM" as unknown as AeadAlgorithm;
+        const bad = "AES-128-OCB" as unknown as AeadAlgorithm;
         // The default throws inside the try; the catch wraps it as TlsDecryptError.
         expect(() => decryptRecord(ciphertext, key, nonce, aad, bad)).toThrow(TlsDecryptError);
     });

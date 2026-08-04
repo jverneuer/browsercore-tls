@@ -78,14 +78,7 @@ export function cipherSuiteToAead(cipherSuite: CipherSuite): AeadAlgorithm {
         case "TLS_AES_128_GCM_SHA256":
             return "AES-128-GCM";
         case "TLS_AES_128_CCM_SHA256":
-            // AES-128-CCM is a real TLS 1.3 cipher suite (RFC 8446), but
-            // @browsercore/crypto exposes only AES-GCM and ChaCha20-Poly1305, so CCM
-            // is never offered in any profile. Fail loudly if it ever reaches here
-            // rather than silently substituting AES-128-GCM, which would let the
-            // handshake complete and then fail every subsequent record decrypt.
-            return throwNotImplemented(
-                "AES-128-CCM (TLS_AES_128_CCM_SHA256) — not backed by @browsercore/crypto",
-            );
+            return "AES-128-CCM";
         case "TLS_AES_256_GCM_SHA384":
             return "AES-256-GCM";
         case "TLS_CHACHA20_POLY1305_SHA256":
@@ -201,6 +194,8 @@ export function encryptRecord(
             return crypto.aes128GcmEncrypt(key, nonce, plaintext, additionalData);
         case "AES-256-GCM":
             return crypto.aes256GcmEncrypt(key, nonce, plaintext, additionalData);
+        case "AES-128-CCM":
+            return crypto.aes128CcmEncrypt(key, nonce, plaintext, additionalData);
         case "CHACHA20-POLY1305":
             return crypto.chacha20Poly1305Encrypt(key, nonce, plaintext, additionalData);
         default:
@@ -234,6 +229,8 @@ export function decryptRecord(
                 return crypto.aes128GcmDecrypt(key, nonce, ciphertext, additionalData);
             case "AES-256-GCM":
                 return crypto.aes256GcmDecrypt(key, nonce, ciphertext, additionalData);
+            case "AES-128-CCM":
+                return crypto.aes128CcmDecrypt(key, nonce, ciphertext, additionalData);
             case "CHACHA20-POLY1305":
                 return crypto.chacha20Poly1305Decrypt(key, nonce, ciphertext, additionalData);
             default:

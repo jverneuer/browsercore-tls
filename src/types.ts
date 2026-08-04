@@ -30,6 +30,7 @@ export const TLS_1_3: ProtocolVersion = { name: "TLS 1.3", wire: 0x0304 } as con
 export type AeadAlgorithm =
     | "AES-128-GCM"
     | "AES-256-GCM"
+    | "AES-128-CCM"
     | "CHACHA20-POLY1305";
 
 /**

@@ -72,8 +72,8 @@ describe("cipher suite helpers", () => {
         expect(cipherSuiteToAead("TLS_AES_128_GCM_SHA256")).toBe("AES-128-GCM");
         expect(cipherSuiteToAead("TLS_AES_256_GCM_SHA384")).toBe("AES-256-GCM");
         expect(cipherSuiteToAead("TLS_CHACHA20_POLY1305_SHA256")).toBe("CHACHA20-POLY1305");
-        // TLS_AES_128_CCM_SHA256 has no backing primitive in @browsercore/crypto,
-        // so cipherSuiteToAead rejects it (see record.test.ts for that assertion).
+        // TLS_AES_128_CCM_SHA256 now maps to "AES-128-CCM" (backed by @browsercore/crypto).
+        // (see record.test.ts for the mapping assertion).
     });
 });
 
