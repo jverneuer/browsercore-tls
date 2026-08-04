@@ -94,11 +94,77 @@ export function cipherSuiteToWire(suite: CipherSuite): number {
             return 0x002f;
         case "TLS_RSA_WITH_AES_256_CBC_SHA":
             return 0x0035;
+        // TLS 1.2 CBC/SHA256 suites (Safari legacy tail).
+        case "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256":
+            return 0xc023;
+        case "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256":
+            return 0xc027;
+        case "TLS_RSA_WITH_AES_128_CBC_SHA256":
+            return 0x003c;
+        case "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384":
+            return 0xc024;
+        case "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384":
+            return 0xc028;
+        case "TLS_RSA_WITH_AES_256_CBC_SHA256":
+            return 0x003d;
+        // TLS 1.2 3DES suites (Safari legacy tail — BoringSSL dropped these,
+        // curl-impersonate restores them so Safari\'s ClientHello matches byte-for-byte).
+        case "TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA":
+            return 0xc008;
+        case "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA":
+            return 0xc012;
+        case "TLS_RSA_WITH_3DES_EDE_CBC_SHA":
+            return 0x000a;
         default:
             // Every CipherSuite member is covered above; this is unreachable but
             // keeps the switch exhaustive if the union is ever extended.
             return assertNever(suite);
     }
+}
+
+/**
+ * Canonical, exhaustive list of every cipher suite the shipped browser
+ * profiles offer. Single source of truth — @browsercore/profiles imports this
+ * instead of maintaining a duplicate table. Order mirrors IANA grouping, not
+ * wire order (profiles define their own wire order).
+ */
+export const ALL_CIPHER_SUITES: readonly CipherSuite[] = [
+    "TLS_GREASE_RESERVED_0",
+    "TLS_AES_128_GCM_SHA256",
+    "TLS_AES_256_GCM_SHA384",
+    "TLS_CHACHA20_POLY1305_SHA256",
+    "TLS_AES_128_CCM_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
+    "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
+    "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA",
+    "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA",
+    "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256",
+    "TLS_RSA_WITH_AES_128_CBC_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384",
+    "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384",
+    "TLS_RSA_WITH_AES_256_CBC_SHA256",
+    "TLS_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_RSA_WITH_AES_128_CBC_SHA",
+    "TLS_RSA_WITH_AES_256_CBC_SHA",
+    "TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA",
+    "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA",
+    "TLS_RSA_WITH_3DES_EDE_CBC_SHA",
+] as const;
+
+/**
+ * Type guard: true when `s` is a known CipherSuite. Profile authors use this to
+ * validate a cipher name before casting.
+ */
+export function isCipherSuite(s: string): s is CipherSuite {
+    return (ALL_CIPHER_SUITES as readonly string[]).includes(s);
 }
 
 /**

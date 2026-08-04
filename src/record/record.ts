@@ -97,10 +97,19 @@ export function cipherSuiteToAead(cipherSuite: CipherSuite): AeadAlgorithm {
         case "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA":
         case "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA":
         case "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA":
+        case "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256":
+        case "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256":
+        case "TLS_RSA_WITH_AES_128_CBC_SHA256":
+        case "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384":
+        case "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384":
+        case "TLS_RSA_WITH_AES_256_CBC_SHA256":
         case "TLS_RSA_WITH_AES_128_GCM_SHA256":
         case "TLS_RSA_WITH_AES_256_GCM_SHA384":
         case "TLS_RSA_WITH_AES_128_CBC_SHA":
         case "TLS_RSA_WITH_AES_256_CBC_SHA":
+        case "TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA":
+        case "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA":
+        case "TLS_RSA_WITH_3DES_EDE_CBC_SHA":
             return throwNotImplemented(
                 `cipher suite ${cipherSuite} has no AEAD mapping — not a negotiable TLS 1.3 suite`,
             );
