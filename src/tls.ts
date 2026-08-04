@@ -23,12 +23,14 @@
 import { crypto, type HashId } from "@browsercore/crypto";
 import type { Transport } from "@browsercore/transport";
 import {
+    systemClock,
     TLS_1_3,
     type ApplicationData,
     type ApplicationTrafficSecrets,
     type CipherSuite,
     type ClientHelloConfig,
     type CloseReason,
+    type Clock,
     type KeyPair,
     type ProtocolVersion,
     type TlsConnection,
@@ -134,6 +136,8 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
     private readonly profile!: ClientHelloConfig;
     private readonly serverName!: string;
     private readonly trustAnchors: readonly Uint8Array[] = [];
+    /** Time source (defaults to systemClock). Injected via TlsOptions.clock. */
+    private readonly clock: Clock;
 
     // --- HandshakeContext: mutable handshake state (read/written by the driver) ---
     public readBuffer: Uint8Array = new Uint8Array(0);
@@ -164,6 +168,10 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
     // to assert on its default public fields) without a live transport. The real
     // entry point, connectTls, always supplies a full options object.
     constructor(options?: TlsOptions) {
+        // The clock defaults to the wall clock so production code never needs to
+        // supply one. Assigned here (before the options guard) so both the no-arg
+        // and full-options paths share the same default.
+        this.clock = options?.clock ?? systemClock;
         if (options !== undefined) {
             this.transport = options.transport;
             this.serverName = options.serverName;
@@ -189,7 +197,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
         if (this.state.state === "open") {
             return;
         }
-        await withTimeout(timeoutMs, () => this.performHandshake());
+        await withTimeout(timeoutMs, () => this.performHandshake(), this.clock);
     }
 
     /**
@@ -307,7 +315,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
      */
     private async performHandshake(): Promise<void> {
         this.state = { state: "handshaking" };
-        const now = Math.floor(Date.now() / 1000);
+        const now = Math.floor(this.clock.now() / 1000);
         this.applicationSecrets = await runHandshake(
             this,
             this.profile,

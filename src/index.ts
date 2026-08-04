@@ -24,6 +24,7 @@ export {
     type CipherSuite,
     type ClientHelloConfig,
     type CloseReason,
+    type Clock,
     type KeyPair,
     type NamedGroup,
     type ProtocolVersion,
@@ -34,6 +35,7 @@ export {
     type TrafficSecrets,
     TLS_1_2,
     TLS_1_3,
+    systemClock,
 } from "./types.js";
 
 export { type TlsProfile, MODERN_TLS13_PROFILE, COMPATIBILITY_PROFILE, getProfile, resolveProfile } from "./profiles/profiles.js";

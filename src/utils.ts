@@ -5,6 +5,8 @@
  * cross-package imports.
  */
 
+import { systemClock, type Clock } from "./types.js";
+
 /**
  * Exhaustiveness check for `switch`/`if-else` over discriminated unions.
  * Call in the `default` branch: `default: assertNever(x)`.
@@ -16,8 +18,8 @@ export function assertNever(x: never): never {
 }
 
 /** Monotonic-ish unique id generator (not cryptographically random). */
-export function createId(prefix: string): string {
-    return `${prefix}_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`;
+export function createId(prefix: string, clock: Clock = systemClock): string {
+    return `${prefix}_${clock.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`;
 }
 
 /**

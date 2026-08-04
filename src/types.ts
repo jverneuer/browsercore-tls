@@ -150,6 +150,27 @@ export interface ClientHelloConfig {
     readonly grease: boolean;
 }
 
+/**
+ * Time source for the TLS stack.
+ *
+ * Injected via {@link TlsOptions.clock} so time-dependent logic (handshake
+ * timeouts, certificate `notBefore`/`notAfter` validation, connection-id
+ * generation) is deterministic under test. The default ({@link systemClock})
+ * delegates to the wall clock — production code never needs to supply one.
+ */
+export interface Clock {
+    /** Current epoch milliseconds (matches Date.now()). */
+    now(): number;
+    /** Resolve after `ms` milliseconds (matches setTimeout). */
+    sleep(ms: number): Promise<void>;
+}
+
+/** The default {@link Clock}: delegates to the wall clock. */
+export const systemClock: Clock = {
+    now: () => Date.now(),
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+};
+
 /** Public options for {@link connectTls}. */
 export interface TlsOptions {
     /** The underlying byte-stream transport (already connected or connecting). */
@@ -164,6 +185,12 @@ export interface TlsOptions {
     readonly handshakeTimeoutMs?: number;
     /** Trust anchors (PEM or DER) for certificate verification. Defaults to system roots. */
     readonly trustAnchors?: readonly Uint8Array[];
+    /**
+     * Time source. Defaults to {@link systemClock}. Inject a deterministic
+     * implementation in tests so timeouts and cert-validity checks are
+     * reproducible.
+     */
+    readonly clock?: Clock;
 }
 
 /**
