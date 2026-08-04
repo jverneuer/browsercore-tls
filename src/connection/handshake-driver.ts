@@ -13,7 +13,7 @@
  * byte-level handshake step lives here and stays independently readable.
  */
 
-import type { Transport } from "@browsercore/transport";
+import type { StreamTransport } from "@browsercore/transport";
 import type { HashId } from "@browsercore/crypto";
 import { TlsHandshakeError } from "../errors.js";
 import { ContentType, cipherSuiteToAead } from "../record/record.js";
@@ -66,7 +66,7 @@ import {
  * The connection implements this; the driver never reaches past these fields.
  */
 export interface HandshakeContext {
-    readonly transport: Transport;
+    readonly transport: StreamTransport;
     /** Mutable: buffered bytes not yet consumed by the record framer. */
     readBuffer: Uint8Array;
     /** Mutable: running transcript of full handshake messages. */
