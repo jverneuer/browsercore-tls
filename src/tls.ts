@@ -6,9 +6,10 @@
  * certificate validation — consuming @browsercore/transport and @browsercore/crypto,
  * never node:crypto directly.
  *
- * TLS 1.2 fallback is intentionally NOT implemented: this client speaks TLS 1.3
- * only. Requesting a TLS 1.2 (only) handshake is rejected up front with a typed
- * error rather than failing silently mid-flight.
+ * TLS 1.2 fallback is supported: this client advertises TLS 1.3 via the
+ * supported_versions extension while retaining TLS 1.2 (0x0303) as the legacy
+ * ClientHello version for middlebox compatibility. Servers that negotiate
+ * TLS 1.2 are handled via the handshake driver's TLS 1.2 branch.
  *
  * The connection class is intentionally a thin coordinator: it owns the mutable
  * connection state (read buffer, sequence counters, traffic secrets, transcript)

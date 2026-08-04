@@ -51,8 +51,8 @@ export const MODERN_TLS13_PROFILE: TlsProfile = {
 /**
  * Broad TLS 1.3 profile: the same modern ciphers as {@link MODERN_TLS13_PROFILE}
  * plus secp384r1 key shares and additional signature algorithms, for servers
- * that require a broader offer. TLS 1.2 is intentionally NOT advertised — this
- * client speaks TLS 1.3 only and rejects TLS 1.2-only handshakes.
+ * that require a broader offer. Retains TLS 1.2 as the legacy ClientHello
+ * version for middlebox compatibility with the TLS 1.2 fallback path.
  */
 export const COMPATIBILITY_PROFILE: TlsProfile = {
     name: "compatibility",
