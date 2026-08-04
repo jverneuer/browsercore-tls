@@ -82,6 +82,13 @@ export function generateKeyShares(groups: readonly string[]): Promise<KeyPair[]>
         for (const group of groups) {
             switch (group) {
                 case "x25519": {
+                    // A preceding PQ hybrid group (X25519Kyber768 / X25519MLKEM768)
+                    // may already have emitted an X25519 share — profiles list PQ
+                    // first then x25519, and real Chrome sends only one X25519
+                    // key_share. Deduplicate to match that behavior.
+                    if (shares.some((s) => s.algorithm === "x25519")) {
+                        break;
+                    }
                     const kp = crypto.x25519GenerateKeyPair();
                     shares.push({ algorithm: "x25519", privateKey: kp.secretKey, publicKey: kp.publicKey });
                     break;
@@ -90,6 +97,36 @@ export function generateKeyShares(groups: readonly string[]): Promise<KeyPair[]>
                 case "secp384r1": {
                     const kp = crypto.ecdhGenerateKeyPair(group);
                     shares.push({ algorithm: group, privateKey: kp.secretKey, publicKey: kp.publicKey });
+                    break;
+                }
+                // Post-quantum hybrid groups: advertise in supported_groups but
+                // send only the classical X25519 key_share (hybrid mode — real
+                // Chrome behavior per RFC 8446 §4.2.7 and the hybrid key exchange
+                // design). Deduplicate: emit at most one X25519 share.
+                case "X25519Kyber768":
+                case "X25519MLKEM768": {
+                    if (!shares.some((s) => s.algorithm === "x25519")) {
+                        const kp = crypto.x25519GenerateKeyPair();
+                        shares.push({ algorithm: "x25519", privateKey: kp.secretKey, publicKey: kp.publicKey });
+                    }
+                    break;
+                }
+                case "Secp256r1MLKEM768": {
+                    // Classical component is secp256r1; emit a secp256r1 share if
+                    // one is not already present.
+                    if (!shares.some((s) => s.algorithm === "secp256r1")) {
+                        const kp = crypto.ecdhGenerateKeyPair("secp256r1");
+                        shares.push({ algorithm: "secp256r1", privateKey: kp.secretKey, publicKey: kp.publicKey });
+                    }
+                    break;
+                }
+                case "Secp384r1MLKEM1024": {
+                    // Classical component is secp384r1; emit a secp384r1 share if
+                    // one is not already present.
+                    if (!shares.some((s) => s.algorithm === "secp384r1")) {
+                        const kp = crypto.ecdhGenerateKeyPair("secp384r1");
+                        shares.push({ algorithm: "secp384r1", privateKey: kp.secretKey, publicKey: kp.publicKey });
+                    }
                     break;
                 }
                 default:

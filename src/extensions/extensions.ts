@@ -167,6 +167,15 @@ export function namedGroupToWire(group: NamedGroup): number {
             return 0x001d;
         case "x448":
             return 0x001e;
+        // Post-quantum hybrid groups (IANA provisional).
+        case "X25519Kyber768":
+            return 0x6399;
+        case "X25519MLKEM768":
+            return 0x11ec;
+        case "Secp256r1MLKEM768":
+            return 0x11eb;
+        case "Secp384r1MLKEM1024":
+            return 0x1204;
         default:
             return assertNever(group);
     }
@@ -183,6 +192,15 @@ export function wireToNamedGroup(wire: number): NamedGroup {
             return "x25519";
         case 0x001e:
             return "x448";
+        // Post-quantum hybrid groups (IANA provisional).
+        case 0x6399:
+            return "X25519Kyber768";
+        case 0x11ec:
+            return "X25519MLKEM768";
+        case 0x11eb:
+            return "Secp256r1MLKEM768";
+        case 0x1204:
+            return "Secp384r1MLKEM1024";
         default:
             throw new TlsHandshakeError("server_hello", {
                 cause: new Error(`unsupported named group wire value: 0x${wire.toString(16)}`),

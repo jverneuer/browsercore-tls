@@ -69,7 +69,17 @@ export type NamedGroup =
     | "secp256r1"
     | "secp384r1"
     | "x25519"
-    | "x448";
+    | "x448"
+    // Post-quantum hybrid key share groups (draft-ietf-tls-hybrid-design).
+    // X25519Kyber768 and X25519MLKEM768 have assigned IANA codes; the two
+    // MLKEM groups below are not yet standardized — they live in the union
+    // for forward-compat but are handled classically on the wire (hybrid
+    // mode: advertised in supported_groups, key_share carries the classical
+    // X25519/secp256r1 component — matching real Chrome behavior).
+    | "X25519Kyber768"
+    | "X25519MLKEM768"
+    | "Secp256r1MLKEM768"
+    | "Secp384r1MLKEM1024";
 
 /**
  * Signature algorithms for certificate verification.

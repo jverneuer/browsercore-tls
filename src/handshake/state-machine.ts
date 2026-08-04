@@ -102,6 +102,14 @@ export function isKeyShareGroup(group: NamedGroup): boolean {
         case "x25519":
         case "x448":
             return true;
+        // Post-quantum hybrid groups are valid TLS 1.3 key-share groups.
+        // They are advertised in supported_groups; the key_share carries the
+        // classical component (handled in generateKeyShares).
+        case "X25519Kyber768":
+        case "X25519MLKEM768":
+        case "Secp256r1MLKEM768":
+        case "Secp384r1MLKEM1024":
+            return true;
         default:
             return assertNever(group);
     }
