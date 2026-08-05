@@ -45,6 +45,10 @@ export {
     silentLogger,
 } from "./types.js";
 
+// Re-exported for downstream consumers (e.g. @browsercore/quic) that map TLS
+// cipher suites to QUIC AEAD algorithms.
+export type { AeadAlgorithm } from "./types.js";
+
 export { type TlsProfile, MODERN_TLS13_PROFILE, COMPATIBILITY_PROFILE, getProfile, resolveProfile } from "./profiles/profiles.js";
 
 export {
@@ -86,3 +90,7 @@ export {
 } from "./crypto/keySchedule.js";
 
 export { assertNever } from "./utils.js";
+
+// Re-exported for downstream consumers (e.g. @browsercore/quic) that run the
+// TLS handshake over a non-TLS transport (QUIC stream 0).
+export { runHandshake, type HandshakeContext } from "./connection/index.js";
