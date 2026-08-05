@@ -5,3 +5,7 @@ coverage/
 .DS_Store
 COVERAGE.md
 package-lock.json
+
+# Codedoc documentation generator output
+.codedoc/
+index.html
