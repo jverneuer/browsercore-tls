@@ -10,6 +10,7 @@ export default defineConfig({
             include: ["src/**"],
             provider: "v8",
             reporter: ["text", "html", "json-summary"],
+            thresholds: { statements: 94, branches: 92, functions: 94, lines: 94 },
         },
     },
 });
