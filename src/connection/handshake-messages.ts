@@ -157,8 +157,22 @@ export async function readEncryptedHandshakeMessage(
     seq: number,
     provider: CryptoProvider = crypto,
 ): Promise<{ whole: Uint8Array; body: Uint8Array; readBuffer: Uint8Array }> {
-    const header = await readHeaderBytesFromRecord(readBuffer, transport)
-    const record = await readRawRecordFromRecord(header.readBuffer, transport, header);
+    // RFC 8446 §5: a TLS 1.3 server may send a single change_cipher_spec record
+    // (content type 20) between ServerHello and the encrypted flight for
+    // middlebox compatibility. Clients MUST silently ignore it. CCS records are
+    // unencrypted and pre-handshake, so they do NOT advance the AEAD sequence
+    // number — only the real encrypted record that follows consumes `seq`.
+    let header = await readHeaderBytesFromRecord(readBuffer, transport);
+    let record = await readRawRecordFromRecord(header.readBuffer, transport, header);
+    while (record.type === ContentType.CHANGE_CIPHER_SPEC) {
+        // Sequential by necessity: each read consumes a prefix of readBuffer and
+        // returns the remainder, so the next read must wait for it. The loop
+        // continuation (record.type) is also re-evaluated after every read.
+        // eslint-disable-next-line no-await-in-loop
+        header = await readHeaderBytesFromRecord(record.readBuffer, transport);
+        // eslint-disable-next-line no-await-in-loop
+        record = await readRawRecordFromRecord(header.readBuffer, transport, header);
+    }
     if (record.type !== ContentType.APPLICATION_DATA) {
         throw new TlsHandshakeError("finished", {
             cause: new Error(`expected encrypted APPLICATION_DATA record, got ${record.type}`),
