@@ -194,9 +194,9 @@ export const silentLogger: Logger = { debug: () => {}, warn: () => {}, error: ()
  * gate happy while still being useful in a dev console.
  */
 export const devLogger: Logger = {
-    debug: (m, ...a) => typeof globalThis !== "undefined" && globalThis.console?.debug?.(m, ...a),
-    warn: (m, ...a) => typeof globalThis !== "undefined" && globalThis.console?.warn?.(m, ...a),
-    error: (m, ...a) => typeof globalThis !== "undefined" && globalThis.console?.error?.(m, ...a),
+    debug: (m, ...a) => { if (typeof globalThis !== "undefined") { globalThis.console?.debug?.(m, ...a); } },
+    warn: (m, ...a) => { if (typeof globalThis !== "undefined") { globalThis.console?.warn?.(m, ...a); } },
+    error: (m, ...a) => { if (typeof globalThis !== "undefined") { globalThis.console?.error?.(m, ...a); } },
 };
 
 /** Public options for {@link connectTls}. */
