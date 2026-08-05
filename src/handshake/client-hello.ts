@@ -47,7 +47,7 @@ export const GREASE_VALUES: readonly number[] = Object.freeze([
  * project coding standards). The throw is unreachable (randomBytes(1) always
  * returns one byte) but keeps the types honest.
  */
-function defaultRandomByte(): number {
+export function defaultRandomByte(): number {
     const byte = crypto.randomBytes(1)[0];
     if (byte === undefined) {
         throw new TlsHandshakeError("client_hello", {
