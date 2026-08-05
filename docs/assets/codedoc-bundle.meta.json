@@ -1,0 +1,121 @@
+{
+  "init": [
+    {
+      "name": "initJssCs",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/transport/setup-jss.js",
+      "hash": "A2IajQvgByWZUpbi9OdyaA=="
+    },
+    {
+      "name": "installTheme",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/content/theme.ts",
+      "hash": "M6oHDKPYeWlugrJuvpCMgQ=="
+    },
+    {
+      "name": "codeSelection",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/components/code/selection.js",
+      "hash": "IqehNmXwftCs6UdGIPHA8Q=="
+    },
+    {
+      "name": "sameLineLengthInCodes",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/components/code/same-line-length.js",
+      "hash": "PWPoUEPqZ+jgdvd5XaNv+w=="
+    },
+    {
+      "name": "initHintBox",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/components/code/line-hint/index.js",
+      "hash": "zw7LJvt5Whv8QgssWFh7PA=="
+    },
+    {
+      "name": "initCodeLineRef",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/components/code/line-ref/index.js",
+      "hash": "UB7rvixJIFi42BTUa2Coqg=="
+    },
+    {
+      "name": "initSmartCopy",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/components/code/smart-copy.js",
+      "hash": "xZ1b2ZoOcy/jlkKhaHxTgA=="
+    },
+    {
+      "name": "copyHeadings",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/components/heading/copy-headings.js",
+      "hash": "DNBrdIMtNuRBN5ZF9kyMrQ=="
+    },
+    {
+      "name": "contentNavHighlight",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/components/page/contentnav/highlight.js",
+      "hash": "STvUl7M2FO+BuO0Yv6wMvw=="
+    },
+    {
+      "name": "loadDeferredIFrames",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/transport/deferred-iframe.js",
+      "hash": "/VYl/iS9x1wFqeoMvlzNIw=="
+    },
+    {
+      "name": "smoothLoading",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/transport/smooth-loading.js",
+      "hash": "UJOXvQBkbrWo8FTcMunhrA=="
+    },
+    {
+      "name": "tocHighlight",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/components/page/toc/toc-highlight.js",
+      "hash": "hW8eIWRypOggeuNlVzdupw=="
+    },
+    {
+      "name": "postNavSearch",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/components/page/toc/search/post-nav/index.js",
+      "hash": "4V+ltF2zF/zu2UpOiRM5aA=="
+    },
+    {
+      "name": "copyLineLinks",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/components/code/line-links/copy-line-link.js",
+      "hash": "15i0X7q9cqwwbexXMlnN2Q=="
+    },
+    {
+      "name": "gatherFootnotes",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/components/footnote/gather-footnotes.js",
+      "hash": "HDBC6skJb3TIstVB08JHlg=="
+    }
+  ],
+  "components": [
+    {
+      "name": "ToCPrevNext",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/components/page/toc/prevnext/index.js",
+      "hash": "aJGqDNq1sSsRDCkHOPJGbQ=="
+    },
+    {
+      "name": "GithubSearch",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/components/misc/github/search.js",
+      "hash": "uQrYGLyeCmoEaQuhYslhdA=="
+    },
+    {
+      "name": "ToCToggle",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/components/page/toc/toggle/index.js",
+      "hash": "yjqtAqJvaTDOrhwlt6sr4w=="
+    },
+    {
+      "name": "DarkModeSwitch",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/components/darkmode/index.js",
+      "hash": "Ar3EhgdcvcXivB9l1PT8Xg=="
+    },
+    {
+      "name": "ConfigTransport",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/transport/config.js",
+      "hash": "RXR5xn0OnfD/Qd/lMPOJzw=="
+    },
+    {
+      "name": "TabSelector",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/components/tabs/selector.js",
+      "hash": "Yk5mUTY0hoQP89KXEFwC7Q=="
+    },
+    {
+      "name": "CollapseControl",
+      "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/components/collapse/collapse-control.js",
+      "hash": "V9qr/afIIRowKlDnThsFmw=="
+    }
+  ],
+  "renderer": {
+    "name": "getRenderer",
+    "filename": "/Users/matte/projects/browsercore/tls/.codedoc/node_modules/@codedoc/core/dist/es6/transport/renderer.js",
+    "hash": "cbeoOT0eo5rL5EJggwDoGg=="
+  }
+}
