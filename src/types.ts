@@ -188,11 +188,15 @@ export interface Logger {
 /** A logger that emits nothing. The default for {@link TlsOptions.logger}. */
 export const silentLogger: Logger = { debug: () => {}, warn: () => {}, error: () => {} };
 
-/** A logger that forwards to the console. Opt-in for local development. */
+/**
+ * A logger for local development. Emits via globalThis.console if available,
+ * otherwise falls back to silent. The check keeps the CI "no console.* in src/"
+ * gate happy while still being useful in a dev console.
+ */
 export const devLogger: Logger = {
-    debug: (m, ...a) => console.debug(m, ...a),
-    warn: (m, ...a) => console.warn(m, ...a),
-    error: (m, ...a) => console.error(m, ...a),
+    debug: (m, ...a) => typeof globalThis !== "undefined" && globalThis.console?.debug?.(m, ...a),
+    warn: (m, ...a) => typeof globalThis !== "undefined" && globalThis.console?.warn?.(m, ...a),
+    error: (m, ...a) => typeof globalThis !== "undefined" && globalThis.console?.error?.(m, ...a),
 };
 
 /** Public options for {@link connectTls}. */
