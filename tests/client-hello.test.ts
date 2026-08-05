@@ -171,3 +171,35 @@ describe("generateGreaseValue defensive guard (noUncheckedIndexedAccess)", () =>
         expect(Number.isInteger(v)).toBe(true);
     });
 });
+
+describe("encodeExtensionBody default branch", () => {
+    it("emits an empty body for an unrecognized extension type that is a GREASE value", async () => {
+        // A GREASE extension type not in the known set (e.g. 0x1a1a) hits the
+        // default branch, passes the isGreaseValue check, and emits empty bytes.
+        const kps = await keyPairs(["x25519"]);
+        const cfg: ClientHelloConfig = {
+            ...BASE_CONFIG,
+            extensionOrder: [0x1a1a], // GREASE value, not a known ExtensionType
+        };
+        const hello = buildClientHello(cfg, kps);
+        expect(hello[0]).toBe(0x01);
+    });
+
+    it("throws for an unrecognized extension type that is NOT a GREASE value", async () => {
+        // A non-GREASE, non-known type (e.g. 0x9999) hits the default branch,
+        // fails the isGreaseValue check, and throws.
+        const kps = await keyPairs(["x25519"]);
+        const cfg: ClientHelloConfig = {
+            ...BASE_CONFIG,
+            extensionOrder: [0x9999],
+        };
+        try {
+            buildClientHello(cfg, kps);
+            expect.unreachable("expected a throw");
+        } catch (e) {
+            const err = e as TlsHandshakeError;
+            expect(err.phase).toBe("client_hello");
+            expect(err.cause?.message).toMatch(/no encoder for extension type/);
+        }
+    });
+});
