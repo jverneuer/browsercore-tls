@@ -8,7 +8,7 @@
  * handshake module only consumes the bytes it produces.
  */
 
-import { crypto, type CryptoProvider } from "@browsercore/crypto";
+import { crypto } from "@browsercore/crypto";
 import type {
     CipherSuite,
     ClientHelloConfig,
@@ -445,7 +445,7 @@ function encodeKeyShareClient(
         out[o++] = greaseValue & 0xff;
         out[o++] = (GREASE_KEY_LENGTH >> 8) & 0xff;
         out[o++] = GREASE_KEY_LENGTH & 0xff;
-        out.set(provider.randomBytes(GREASE_KEY_LENGTH), o);
+        out.set(crypto.randomBytes(GREASE_KEY_LENGTH), o);
         o += GREASE_KEY_LENGTH;
     }
     for (const kp of keyPairs) {

@@ -13,7 +13,7 @@
  * byte-level handshake step lives here and stays independently readable.
  */
 
-import type { StreamTransport } from "@browsercore/transport";
+import type { Transport } from "@browsercore/transport";
 import type { CryptoProvider, HashId } from "@browsercore/crypto";
 import { TlsHandshakeError } from "../errors.js";
 import { ContentType, cipherSuiteToAead } from "../record/record.js";
@@ -66,7 +66,7 @@ import {
  * The connection implements this; the driver never reaches past these fields.
  */
 export interface HandshakeContext {
-    readonly transport: StreamTransport;
+    readonly transport: Transport;
     /** Cryptographic provider (defaults to the @browsercore/crypto singleton). */
     crypto: CryptoProvider;
     /** Mutable: buffered bytes not yet consumed by the record framer. */
@@ -134,7 +134,10 @@ export async function runHandshake(
     const keyPairs = await generateKeyShares(desired);
 
     // 2. Build and send the ClientHello as a plaintext handshake record.
-    const clientHello = buildClientHello(profile, keyPairs, ctx.crypto);
+    const clientHello = buildClientHello(profile, keyPairs, () => {
+        const byte = ctx.crypto.randomBytes(1)[0];
+        return byte === undefined ? 0 : byte / 256;
+    });
     ctx.transcript.push(clientHello);
     await writeRecord(ctx.transport, ContentType.HANDSHAKE, clientHello);
 

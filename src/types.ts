@@ -7,7 +7,7 @@
  */
 
 import type { CryptoProvider } from "@browsercore/crypto";
-import type { StreamTransport } from "@browsercore/transport";
+import type { Transport } from "@browsercore/transport";
 import type { TlsError } from "./errors.js";
 
 /** Branded TLS session identifier. */
@@ -169,7 +169,7 @@ export interface Clock {
 /** The default {@link Clock}: delegates to the wall clock. */
 export const systemClock: Clock = {
     now: () => Date.now(),
-    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    sleep: (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
 };
 
 /**
@@ -202,7 +202,7 @@ export const devLogger: Logger = {
 /** Public options for {@link connectTls}. */
 export interface TlsOptions {
     /** The underlying byte-stream transport (already connected or connecting). */
-    readonly transport: StreamTransport;
+    readonly transport: Transport;
     /** SNI server name. Defaults to host if omitted. */
     readonly serverName: string;
     /** ClientHello configuration (placeholder until @browsercore/profiles is built). */

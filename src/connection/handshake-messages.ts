@@ -10,7 +10,7 @@
  */
 
 import { crypto, type CryptoProvider, type HashId } from "@browsercore/crypto";
-import type { StreamTransport } from "@browsercore/transport";
+import type { Transport } from "@browsercore/transport";
 import type { TrafficSecrets } from "../types.js";
 import { TlsHandshakeError } from "../errors.js";
 import { ExtensionType, findExtension, parseExtensions } from "../extensions/extensions.js";
@@ -151,7 +151,7 @@ export function buildClientFinishedMessage(
  */
 export async function readEncryptedHandshakeMessage(
     readBuffer: Uint8Array,
-    transport: StreamTransport,
+    transport: Transport,
     aead: Parameters<typeof encryptRecord>[4],
     traffic: TrafficSecrets,
     seq: number,
