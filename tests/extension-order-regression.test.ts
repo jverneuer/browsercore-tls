@@ -94,7 +94,7 @@ describe("Extensions appear in the exact order specified by the profile", () => 
         // chrome-140 advertises 16 extensions in a specific order — the encoder
         // must emit all of them, in that order, not stop after 5.
         const order = [
-            0, 10, 11, 13, 16, 17513, 18, 23, 27, 35, 41, 43, 45, 5, 51, 65281,
+            0, 10, 11, 13, 16, 17613, 18, 23, 27, 35, 41, 43, 45, 5, 51, 65281,
         ];
         const hello = buildClientHello(baseConfig(order, false), await x25519KeyPair());
         expect(parseExtensionTypes(hello)).toEqual([...order]);

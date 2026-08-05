@@ -46,7 +46,7 @@ const CHROME140_CIPHER_SUITES = [
 
 /** The chrome-140 profile's exact extension order (GREASE prepended at runtime). */
 const CHROME140_EXTENSION_ORDER = [
-    0, 10, 11, 13, 16, 17513, 18, 23, 27, 35, 41, 43, 45, 5, 51, 65281,
+    0, 10, 11, 13, 16, 17613, 18, 23, 27, 35, 41, 43, 45, 5, 51, 65281,
 ];
 
 function chrome140Config(): ClientHelloConfig {
