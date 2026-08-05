@@ -26,6 +26,7 @@ import {
     type HandshakePhase,
     type ServerHello,
 } from "../handshake/handshake.js";
+import { defaultRandomByte } from "../handshake/client-hello.js";
 import {
     deriveApplicationSecrets,
     deriveHandshakeTrafficSecrets,
@@ -134,7 +135,7 @@ export async function runHandshake(
     const keyPairs = await generateKeyShares(desired);
 
     // 2. Build and send the ClientHello as a plaintext handshake record.
-    const clientHello = buildClientHello(profile, keyPairs, ctx.crypto);
+    const clientHello = buildClientHello(profile, keyPairs, defaultRandomByte, ctx.crypto);
     ctx.transcript.push(clientHello);
     await writeRecord(ctx.transport, ContentType.HANDSHAKE, clientHello);
 

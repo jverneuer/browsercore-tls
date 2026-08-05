@@ -47,7 +47,7 @@ export const GREASE_VALUES: readonly number[] = Object.freeze([
  * project coding standards). The throw is unreachable (randomBytes(1) always
  * returns one byte) but keeps the types honest.
  */
-function defaultRandomByte(): number {
+export function defaultRandomByte(): number {
     const byte = crypto.randomBytes(1)[0];
     if (byte === undefined) {
         throw new TlsHandshakeError("client_hello", {
@@ -162,8 +162,8 @@ export function cipherSuiteToWire(suite: CipherSuite): number {
 export function buildClientHello(
     config: ClientHelloConfig,
     keyPairs: readonly KeyPair[],
-    provider: CryptoProvider = crypto,
     random: () => number = defaultRandomByte,
+    provider: CryptoProvider = crypto,
 ): Uint8Array {
     const greaseValue = config.grease ? generateGreaseValue(random) : 0;
 
@@ -460,6 +460,7 @@ function encodeKeyShareClient(
     greaseValue: number = 0,
 ): Uint8Array {
     // client_shares: length(2) + entries. Each: group(2) + len(2) + key_exchange.
+    const greaseEntry = config.grease ? 2 + 2 + GREASE_KEY_LENGTH : 0;
     let entriesLen = greaseEntry;
     for (const kp of keyPairs) {
         entriesLen += 2 + 2 + kp.publicKey.length;

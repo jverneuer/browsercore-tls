@@ -100,7 +100,8 @@ function greasedConfig(): ClientHelloConfig {
 
 describe("Every ClientHello (grease=true) contains GREASE in cipher suites", () => {
     it("prepends a GREASE cipher suite (0x0a0a) at the front of the offered list", async () => {
-        const hello = buildClientHello(greasedConfig(), await x25519KeyPair());
+        // Pin the per-connection sentinel deterministically (random()=0.0 -> 0x0a0a).
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0);
         const suites = parseCipherSuites(hello);
         expect(suites.length).toBeGreaterThan(0);
         expect(suites[0]).toBe(CANONICAL_GREASE);
@@ -115,7 +116,7 @@ describe("Every ClientHello (grease=true) contains GREASE in cipher suites", () 
     it("places GREASE first even when the profile omits TLS_GREASE_RESERVED_0", async () => {
         // The profile here does NOT list TLS_GREASE_RESERVED_0 — yet the encoder
         // must still prepend the canonical GREASE sentinel when grease=true.
-        const hello = buildClientHello(greasedConfig(), await x25519KeyPair());
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0);
         const suites = parseCipherSuites(hello);
         expect(suites[0]).toBe(CANONICAL_GREASE);
         // The real ciphers follow the GREASE sentinel.
@@ -127,7 +128,7 @@ describe("Every ClientHello (grease=true) contains GREASE in cipher suites", () 
             ...greasedConfig(),
             cipherSuites: ["TLS_AES_128_GCM_SHA256"],
         };
-        const hello = buildClientHello(cfg, await x25519KeyPair());
+        const hello = buildClientHello(cfg, await x25519KeyPair(), () => 0.0);
         const suites = parseCipherSuites(hello);
         expect(suites[0]).toBe(CANONICAL_GREASE);
         expect(suites).toHaveLength(2); // GREASE + the single real suite
@@ -136,7 +137,7 @@ describe("Every ClientHello (grease=true) contains GREASE in cipher suites", () 
 
 describe("Every ClientHello (grease=true) contains a GREASE extension", () => {
     it("prepends a GREASE extension (type 0x0a0a) ahead of the profile order", async () => {
-        const hello = buildClientHello(greasedConfig(), await x25519KeyPair());
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0);
         const extensions = parseExtensions(hello);
         expect(extensions.length).toBeGreaterThan(0);
         expect(extensions[0]!.type).toBe(CANONICAL_GREASE);
@@ -155,7 +156,7 @@ describe("Every ClientHello (grease=true) contains a GREASE extension", () => {
     });
 
     it("the profile's extensions follow the GREASE extension in order", async () => {
-        const hello = buildClientHello(greasedConfig(), await x25519KeyPair());
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0);
         const extensions = parseExtensions(hello);
         const types = extensions.map((e) => e.type);
         expect(types[0]).toBe(CANONICAL_GREASE);
@@ -165,7 +166,7 @@ describe("Every ClientHello (grease=true) contains a GREASE extension", () => {
 
 describe("Every ClientHello (grease=true) contains a GREASE key share", () => {
     it("prepends a GREASE key-share group (0x0a0a) in the key_share extension", async () => {
-        const hello = buildClientHello(greasedConfig(), await x25519KeyPair());
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0);
         const extensions = parseExtensions(hello);
         const ks = extensions.find((e) => e.type === ExtensionType.KEY_SHARE);
         expect(ks).toBeDefined();
@@ -183,7 +184,7 @@ describe("Every ClientHello (grease=true) contains a GREASE key share", () => {
     });
 
     it("the real key-share groups follow the GREASE group", async () => {
-        const hello = buildClientHello(greasedConfig(), await x25519KeyPair());
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0);
         const extensions = parseExtensions(hello);
         const ks = extensions.find((e) => e.type === ExtensionType.KEY_SHARE)!;
         // GREASE group at offset 2, real group right after (GREASE key is 32 bytes).

@@ -107,7 +107,8 @@ describe("Extensions appear in the exact order specified by the profile", () => 
             ExtensionType.SUPPORTED_VERSIONS,
             ExtensionType.KEY_SHARE,
         ];
-        const hello = buildClientHello(baseConfig(order, true), await x25519KeyPair());
+        // Pin the per-connection sentinel deterministically (random()=0.0 -> 0x0a0a).
+        const hello = buildClientHello(baseConfig(order, true), await x25519KeyPair(), () => 0.0);
         const types = parseExtensionTypes(hello);
         expect(types[0]).toBe(0x0a0a);
         expect(types.slice(1)).toEqual([...order]);
