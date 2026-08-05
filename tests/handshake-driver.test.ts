@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { defaultX25519Backend } from "@browsercore/crypto";
 import { connectTls } from "../src/tls.js";
 import { TlsHandshakeError } from "../src/errors.js";
 import { ContentType } from "../src/record/record.js";
@@ -74,6 +75,24 @@ describe("connectTls full handshake (runHandshake)", () => {
         expect(transport.written.length).toBe(2);
         expect(transport.written[0]![0]).toBe(ContentType.HANDSHAKE);
         expect(transport.written[1]![0]).toBe(ContentType.APPLICATION_DATA);
+    });
+
+    it("completes the handshake when the server uses an injected X25519Backend (breaks circular masking)", async () => {
+        // The server simulator normally computes the shared secret via the same
+        // `crypto.x25519SharedSecret()` the client uses — circular masking that
+        // hides X25519 regressions. Injecting an independent backend breaks
+        // that: if the client's X25519 drifts from the noble backend's, the
+        // derived traffic secrets diverge and the Finished verify fails.
+        const sim = new TlsServerSim({ x25519Backend: defaultX25519Backend });
+        const transport = new HandshakeTransport(sim);
+        const conn = await connectTls({
+            transport,
+            serverName: "example.com",
+            profile: PROFILE,
+        });
+        expect(conn.state.state).toBe("open");
+        expect(conn.cipherSuite).toBe("TLS_AES_128_GCM_SHA256");
+        expect(conn.protocolVersion).toEqual(TLS_1_3);
     });
 
     it("negotiates ALPN when the server offers it in EncryptedExtensions", async () => {

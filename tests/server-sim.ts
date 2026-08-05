@@ -11,6 +11,7 @@
  */
 
 import { crypto } from "@browsercore/crypto";
+import type { X25519Backend } from "@browsercore/crypto";
 import { generateKeyPairSync, createSign } from "node:crypto";
 import {
     ContentType,
@@ -73,6 +74,13 @@ export interface ServerOptions {
     alpn?: string;
     /** Cipher suite wire value to negotiate (default 0x1301 = AES-128-GCM). */
     cipherWire?: number;
+    /**
+     * X25519 backend for the server-side shared secret. When set, the server
+     * uses this independent backend rather than the shared `crypto` provider
+     * the client drives — breaking the circular masking where both sides call
+     * the same (potentially buggy) implementation.
+     */
+    x25519Backend?: X25519Backend;
 }
 
 export class TlsServerSim {
@@ -82,9 +90,11 @@ export class TlsServerSim {
     private clientKeySharePub: Uint8Array | undefined;
     private clientHelloMsg: Uint8Array | undefined;
     private readonly opts: ServerOptions;
+    private readonly x25519Backend: X25519Backend | undefined;
 
     constructor(opts: ServerOptions = {}) {
         this.opts = opts;
+        this.x25519Backend = opts.x25519Backend;
         this.leafDer = this.makeSelfSignedCert("example.com");
     }
 
@@ -293,8 +303,11 @@ export class TlsServerSim {
             serverHelloMsg,
         );
 
-        // Shared secret + handshake traffic secrets.
-        const sharedSecret = crypto.x25519SharedSecret(this.serverKeys.secretKey, this.clientKeySharePub);
+        // Shared secret + handshake traffic secrets. Use the injected backend
+        // when provided, otherwise fall back to the shared crypto provider.
+        const sharedSecret = this.x25519Backend
+            ? this.x25519Backend.sharedSecret(this.serverKeys.secretKey, this.clientKeySharePub)
+            : crypto.x25519SharedSecret(this.serverKeys.secretKey, this.clientKeySharePub);
         const cipherSuite = "TLS_AES_128_GCM_SHA256" as const;
         const helloTranscript = [clientHelloMsg, serverHelloMsg];
         const helloHash = transcriptHash(helloTranscript, "SHA-256");
