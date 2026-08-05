@@ -8,28 +8,19 @@
  * this plumbing.
  */
 
-import type { CloseReason, TlsState } from "../types.js";
+import { systemClock, type Clock, type CloseReason, type TlsState } from "../types.js";
 import { TlsAlertError, TlsHandshakeError, type TlsError } from "../errors.js";
 import { ContentType } from "../record/record.js";
 import { assertNever } from "../utils.js";
 
 /** Race `run` against a timeout, rejecting with a handshake error if it fires. */
-export async function withTimeout(ms: number, run: () => Promise<void>): Promise<void> {
-    let timer: NodeJS.Timeout | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-            reject(new TlsHandshakeError("finished", {
-                cause: new Error(`handshake timed out after ${ms}ms`),
-            }));
-        }, ms);
+export async function withTimeout(ms: number, run: () => Promise<void>, clock: Clock = systemClock): Promise<void> {
+    const timeout = clock.sleep(ms).then(() => {
+        throw new TlsHandshakeError("finished", {
+            cause: new Error(`handshake timed out after ${ms}ms`),
+        });
     });
-    try {
-        await Promise.race([run(), timeout]);
-    } finally {
-        if (timer !== undefined) {
-            clearTimeout(timer);
-        }
-    }
+    await Promise.race([run(), timeout]);
 }
 
 /**

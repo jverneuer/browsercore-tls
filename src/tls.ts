@@ -6,9 +6,9 @@
  * certificate validation — consuming @browsercore/transport and @browsercore/crypto,
  * never node:crypto directly.
  *
- * TLS 1.2 fallback is intentionally NOT implemented: this client speaks TLS 1.3
- * only. Requesting a TLS 1.2 (only) handshake is rejected up front with a typed
- * error rather than failing silently mid-flight.
+ * Supports TLS 1.3 (RFC 8446) with optional TLS 1.2 fallback (RFC 5246).
+ * TLS 1.2 support is gated behind server negotiation: if the server selects a
+ * TLS 1.2 cipher suite, the handshake driver branches to runTls12Handshake().
  *
  * The connection class is intentionally a thin coordinator: it owns the mutable
  * connection state (read buffer, sequence counters, traffic secrets, transcript)
@@ -20,16 +20,20 @@
  * this file focused on the public surface.
  */
 
-import { crypto, type HashId } from "@browsercore/crypto";
+import { crypto, type CryptoProvider, type HashId } from "@browsercore/crypto";
 import type { Transport } from "@browsercore/transport";
 import {
+    systemClock,
     TLS_1_3,
+    silentLogger,
     type ApplicationData,
     type ApplicationTrafficSecrets,
     type CipherSuite,
     type ClientHelloConfig,
     type CloseReason,
+    type Clock,
     type KeyPair,
+    type Logger,
     type ProtocolVersion,
     type TlsConnection,
     type TlsOptions,
@@ -68,27 +72,38 @@ const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
  * groups, signature algorithms).
  */
 export async function connectTls(options: TlsOptions): Promise<TlsConnection> {
-    const conn = new TlsConnectionImpl(options);
+    const provider = options.crypto ?? crypto;
+    const conn = new TlsConnectionImpl(options, provider);
     await conn.handshake();
     return conn;
 }
 
 /** Generate key shares for the requested groups (delegates to @browsercore/crypto). */
-export function generateKeyShares(groups: readonly string[]): Promise<KeyPair[]> {
+export function generateKeyShares(groups: readonly string[], provider: CryptoProvider = crypto): Promise<KeyPair[]> {
     // Wrapped in .then() so a synchronous throw (unsupported group) becomes a
     // rejected promise — callers await this and tests assert with .rejects.
     return Promise.resolve().then(() => {
         const shares: KeyPair[] = [];
         for (const group of groups) {
             switch (group) {
+                // Post-quantum hybrid groups (RFC 8446 §4.2.7 + hybrid design).
+                // Advertised in supported_groups but we send the classical
+                // X25519 key_share — matching real Chrome hybrid mode. The
+                // server combines it with its own PQ share if it supports the
+                // hybrid group, so no separate PQ key pair is generated here.
+                // These empty cases fall through to the x25519 case below.
+                case "X25519Kyber768":
+                case "X25519MLKEM768":
+                case "Secp256r1MLKEM768":
+                case "Secp384r1MLKEM1024":
                 case "x25519": {
-                    const kp = crypto.x25519GenerateKeyPair();
+                    const kp = provider.x25519GenerateKeyPair();
                     shares.push({ algorithm: "x25519", privateKey: kp.secretKey, publicKey: kp.publicKey });
                     break;
                 }
                 case "secp256r1":
                 case "secp384r1": {
-                    const kp = crypto.ecdhGenerateKeyPair(group);
+                    const kp = provider.ecdhGenerateKeyPair(group);
                     shares.push({ algorithm: group, privateKey: kp.secretKey, publicKey: kp.publicKey });
                     break;
                 }
@@ -134,6 +149,12 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
     private readonly profile!: ClientHelloConfig;
     private readonly serverName!: string;
     private readonly trustAnchors: readonly Uint8Array[] = [];
+    /** Time source (defaults to systemClock). Injected via TlsOptions.clock. */
+    private readonly clock: Clock;
+    /** Logging sink (defaults to silentLogger). Injected via TlsOptions. */
+    private readonly logger: Logger;
+    /** Cryptographic provider (defaults to the @browsercore/crypto singleton). */
+    public readonly crypto!: CryptoProvider;
 
     // --- HandshakeContext: mutable handshake state (read/written by the driver) ---
     public readBuffer: Uint8Array = new Uint8Array(0);
@@ -163,7 +184,16 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
     // `options` is optional so a connection can be constructed in isolation (e.g.
     // to assert on its default public fields) without a live transport. The real
     // entry point, connectTls, always supplies a full options object.
-    constructor(options?: TlsOptions) {
+    constructor(options?: TlsOptions, provider: CryptoProvider = crypto) {
+        // The clock defaults to the wall clock so production code never needs to
+        // supply one. Assigned here (before the options guard) so both the no-arg
+        // and full-options paths share the same default.
+        this.clock = options?.clock ?? systemClock;
+        // The logger defaults to silent so library consumers see no output unless
+        // they opt in. Assigned here so both the no-arg and full-options paths
+        // share the same default.
+        this.logger = options?.logger ?? silentLogger;
+        this.crypto = provider;
         if (options !== undefined) {
             this.transport = options.transport;
             this.serverName = options.serverName;
@@ -189,7 +219,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
         if (this.state.state === "open") {
             return;
         }
-        await withTimeout(timeoutMs, () => this.performHandshake());
+        await withTimeout(timeoutMs, () => this.performHandshake(), this.clock);
     }
 
     /**
@@ -222,6 +252,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
                 this.aead,
                 this.applicationSecrets.server,
                 this.serverAppSeq,
+                this.crypto,
             );
             this.readBuffer = readBuffer;
             this.serverAppSeq++;
@@ -248,6 +279,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
                     ContentType.APPLICATION_DATA,
                     fragment,
                     this.clientAppSeq,
+                    this.crypto,
                 );
                 this.clientAppSeq++;
             }
@@ -274,6 +306,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
                     ContentType.ALERT,
                     alert,
                     this.clientAppSeq,
+                    this.crypto,
                 );
             } catch {
                 // ignore — we are closing anyway
@@ -281,6 +314,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
         }
         await this.transport.close();
         this.transition({ state: "closed", reason: { kind: "close_notify" } });
+        this.logger.debug("tls connection closed", { sessionId: this.id });
         notifyClose(this.closeListeners, { kind: "close_notify" });
     }
 
@@ -307,13 +341,14 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
      */
     private async performHandshake(): Promise<void> {
         this.state = { state: "handshaking" };
-        const now = Math.floor(Date.now() / 1000);
+        this.logger.debug("tls handshake start", { sessionId: this.id, serverName: this.serverName });
+        const now = Math.floor(this.clock.now() / 1000);
         this.applicationSecrets = await runHandshake(
             this,
             this.profile,
             this.serverName,
             this.trustAnchors,
-            generateKeyShares,
+            (groups) => generateKeyShares(groups, this.crypto),
             now,
         );
         // Expose the negotiated parameters the driver wrote onto the context.
@@ -327,6 +362,12 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
             protocolVersion: this.protocolVersion,
             cipherSuite: this.cipherSuite,
             ...(this.alpnProtocol === undefined ? {} : { alpnProtocol: this.alpnProtocol }),
+        });
+        this.logger.debug("tls handshake complete", {
+            sessionId: this.id,
+            protocolVersion: this.protocolVersion.name,
+            cipherSuite: this.cipherSuite,
+            alpn: this.alpnProtocol,
         });
     }
 

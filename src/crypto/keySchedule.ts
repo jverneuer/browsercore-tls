@@ -11,7 +11,7 @@
  * the two steps independently (the extract output feeds the next stage's salt).
  */
 
-import { crypto, SHA_256, SHA_384, type HashId } from "@browsercore/crypto";
+import { crypto, SHA_256, SHA_384, type CryptoProvider, type HashId } from "@browsercore/crypto";
 import type {
     ApplicationTrafficSecrets,
     CipherSuite,
@@ -141,17 +141,15 @@ export function hashFor(cipherSuite: CipherSuite): HashId {
  * HKDF-Extract(salt, Ikm) = HMAC-Hash(salt, Ikm), per RFC 5869 §2.3.
  * The output is exactly {@link hashLengthFor}(hash) bytes.
  */
-function hkdfExtract(hash: HashId, salt: Uint8Array, ikm: Uint8Array): Uint8Array {
-    // crypto.hmac is declared to return Uint8Array; the cast that used to live
-    // here was redundant.
-    return crypto.hmac(hash, salt, ikm);
+function hkdfExtract(hash: HashId, salt: Uint8Array, ikm: Uint8Array, provider: CryptoProvider = crypto): Uint8Array {
+    return provider.hmac(hash, salt, ikm);
 }
 
 /**
  * HKDF-Expand(PRK, info, length) per RFC 5869 §2.3, implemented on top of HMAC
  * because @browsercore/crypto exposes only the combined extract+expand helper.
  */
-function hkdfExpand(hash: HashId, prk: Uint8Array, info: Uint8Array, length: number): Uint8Array {
+function hkdfExpand(hash: HashId, prk: Uint8Array, info: Uint8Array, length: number, provider: CryptoProvider = crypto): Uint8Array {
     const hashLen = hashLengthFor(hash);
     const n = Math.ceil(length / hashLen);
     if (n > 255) {
@@ -164,7 +162,7 @@ function hkdfExpand(hash: HashId, prk: Uint8Array, info: Uint8Array, length: num
         block.set(t, 0);
         block.set(info, t.length);
         block[block.length - 1] = i;
-        t = crypto.hmac(hash, prk, block);
+        t = provider.hmac(hash, prk, block);
         okm.set(t, (i - 1) * hashLen);
     }
     return okm.subarray(0, length);
@@ -184,6 +182,7 @@ export function hkdfExpandLabel(
     context: Uint8Array,
     length: number,
     hash: HashId,
+    provider: CryptoProvider = crypto,
 ): Uint8Array {
     const prefix = "tls13 ";
     const labelBytes = new TextEncoder().encode(prefix + label);
@@ -197,7 +196,7 @@ export function hkdfExpandLabel(
     o += labelBytes.length;
     hkdfLabel[o++] = context.length & 0xff;
     hkdfLabel.set(context, o);
-    return hkdfExpand(hash, secret, hkdfLabel, length);
+    return hkdfExpand(hash, secret, hkdfLabel, length, provider);
 }
 
 /**
@@ -211,9 +210,10 @@ export function deriveTrafficSecrets(
     trafficSecret: Uint8Array,
     cipherSuite: CipherSuite,
     hash: HashId,
+    provider: CryptoProvider = crypto,
 ): TrafficSecrets {
-    const key = hkdfExpandLabel(trafficSecret, "key", new Uint8Array(0), cipherSuiteKeyLength(cipherSuite), hash);
-    const iv = hkdfExpandLabel(trafficSecret, "iv", new Uint8Array(0), cipherSuiteIvLength(cipherSuite), hash);
+    const key = hkdfExpandLabel(trafficSecret, "key", new Uint8Array(0), cipherSuiteKeyLength(cipherSuite), hash, provider);
+    const iv = hkdfExpandLabel(trafficSecret, "iv", new Uint8Array(0), cipherSuiteIvLength(cipherSuite), hash, provider)
     return { key, iv };
 }
 
@@ -235,6 +235,7 @@ export function deriveHandshakeTrafficSecrets(
     sharedSecret: Uint8Array,
     helloTranscript: Uint8Array,
     cipherSuite: CipherSuite,
+    provider: CryptoProvider = crypto,
 ): {
     masterSecret: Uint8Array;
     clientTrafficSecret: Uint8Array;
@@ -245,21 +246,21 @@ export function deriveHandshakeTrafficSecrets(
     const zeros = new Uint8Array(hashLen);
 
     // early_secret = HKDF-Extract(0, 0)
-    const earlySecret = hkdfExtract(hash, zeros, zeros);
+    const earlySecret = hkdfExtract(hash, zeros, zeros, provider)
 
     // derived = HKDF-Expand-Label(early_secret, "derived", "", Hash.length)
-    const derived = hkdfExpandLabel(earlySecret, "derived", new Uint8Array(0), hashLen, hash);
+    const derived = hkdfExpandLabel(earlySecret, "derived", new Uint8Array(0), hashLen, hash, provider);
 
     // handshake_secret = HKDF-Extract(derived, sharedSecret)
-    const handshakeSecret = hkdfExtract(hash, derived, sharedSecret);
+    const handshakeSecret = hkdfExtract(hash, derived, sharedSecret, provider);
 
     // client/server handshake traffic secrets.
-    const clientTrafficSecret = hkdfExpandLabel(handshakeSecret, "c hs traffic", helloTranscript, hashLen, hash);
-    const serverTrafficSecret = hkdfExpandLabel(handshakeSecret, "s hs traffic", helloTranscript, hashLen, hash);
+    const clientTrafficSecret = hkdfExpandLabel(handshakeSecret, "c hs traffic", helloTranscript, hashLen, hash, provider);
+    const serverTrafficSecret = hkdfExpandLabel(handshakeSecret, "s hs traffic", helloTranscript, hashLen, hash, provider)
 
     // master_secret = HKDF-Extract(Derive-Secret(handshake_secret, "derived", ""), 0)
-    const masterDerived = hkdfExpandLabel(handshakeSecret, "derived", new Uint8Array(0), hashLen, hash);
-    const masterSecret = hkdfExtract(hash, masterDerived, zeros);
+    const masterDerived = hkdfExpandLabel(handshakeSecret, "derived", new Uint8Array(0), hashLen, hash, provider);
+    const masterSecret = hkdfExtract(hash, masterDerived, zeros, provider)
 
     return { masterSecret, clientTrafficSecret, serverTrafficSecret };
 }
@@ -279,6 +280,7 @@ export function deriveHandshakeSecrets(
     sharedSecret: Uint8Array,
     helloTranscript: Uint8Array,
     cipherSuite: CipherSuite,
+    provider: CryptoProvider = crypto,
 ): {
     masterSecret: Uint8Array;
     traffic: ApplicationTrafficSecrets;
@@ -288,13 +290,14 @@ export function deriveHandshakeSecrets(
         sharedSecret,
         helloTranscript,
         cipherSuite,
+        provider,
     );
 
     return {
         masterSecret,
         traffic: {
-            client: deriveTrafficSecrets(clientTrafficSecret, cipherSuite, hash),
-            server: deriveTrafficSecrets(serverTrafficSecret, cipherSuite, hash),
+            client: deriveTrafficSecrets(clientTrafficSecret, cipherSuite, hash, provider),
+            server: deriveTrafficSecrets(serverTrafficSecret, cipherSuite, hash, provider),
         },
     };
 }
@@ -311,16 +314,17 @@ export function deriveApplicationSecrets(
     masterSecret: Uint8Array,
     handshakeTranscript: Uint8Array,
     cipherSuite: CipherSuite,
+    provider: CryptoProvider = crypto,
 ): ApplicationTrafficSecrets {
     const hash = cipherSuiteToHash(cipherSuite);
     const hashLen = hashLengthFor(hash);
 
-    const clientApTraffic = hkdfExpandLabel(masterSecret, "c ap traffic", handshakeTranscript, hashLen, hash);
-    const serverApTraffic = hkdfExpandLabel(masterSecret, "s ap traffic", handshakeTranscript, hashLen, hash);
+    const clientApTraffic = hkdfExpandLabel(masterSecret, "c ap traffic", handshakeTranscript, hashLen, hash, provider);
+    const serverApTraffic = hkdfExpandLabel(masterSecret, "s ap traffic", handshakeTranscript, hashLen, hash, provider)
 
     return {
-        client: deriveTrafficSecrets(clientApTraffic, cipherSuite, hash),
-        server: deriveTrafficSecrets(serverApTraffic, cipherSuite, hash),
+        client: deriveTrafficSecrets(clientApTraffic, cipherSuite, hash, provider),
+        server: deriveTrafficSecrets(serverApTraffic, cipherSuite, hash, provider),
     };
 }
 
@@ -333,11 +337,11 @@ export function deriveApplicationSecrets(
  * @param currentSecret The current application traffic secret (Hash.length bytes).
  * @param cipherSuite   Negotiated cipher suite (selects hash + AEAD sizes).
  */
-export function updateTrafficSecrets(currentSecret: Uint8Array, cipherSuite: CipherSuite): TrafficSecrets {
+export function updateTrafficSecrets(currentSecret: Uint8Array, cipherSuite: CipherSuite, provider: CryptoProvider = crypto): TrafficSecrets {
     const hash = cipherSuiteToHash(cipherSuite);
     const hashLen = hashLengthFor(hash);
-    const nextSecret = hkdfExpandLabel(currentSecret, "traffic upd", new Uint8Array(0), hashLen, hash);
-    return deriveTrafficSecrets(nextSecret, cipherSuite, hash);
+    const nextSecret = hkdfExpandLabel(currentSecret, "traffic upd", new Uint8Array(0), hashLen, hash, provider);
+    return deriveTrafficSecrets(nextSecret, cipherSuite, hash, provider);
 }
 
 /** Validate that the server selected a cipher suite we actually offered. */

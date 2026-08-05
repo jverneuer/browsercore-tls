@@ -4,9 +4,11 @@
 [![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jverneuer/browsercore-tls/coverage/coverage/badge.json)](https://github.com/jverneuer/browsercore-tls/blob/main/COVERAGE.md)
 [![lint](https://img.shields.io/github/actions/workflow/status/jverneuer/browsercore-tls/ci.yml?label=lint)](https://github.com/jverneuer/browsercore-tls/actions/workflows/ci.yml)
 
-A TLS 1.3 client implemented entirely in TypeScript. TLS 1.2 fallback is
-intentionally not implemented — requesting a TLS 1.2-only handshake is rejected
-up front with a typed error rather than failing silently mid-flight.
+A TLS 1.3 client implemented entirely in TypeScript, with optional TLS 1.2
+fallback (RFC 5246). TLS 1.2 support is gated behind server negotiation: if the
+server selects a TLS 1.2 cipher suite, the handshake driver branches to
+runTls12Handshake(). Requesting a TLS 1.2-only handshake (one that cannot
+negotiate TLS 1.3) is rejected up front with a typed error.
 
 ## Responsibility
 
@@ -106,7 +108,6 @@ without leaking backend specifics (`TlsHandshakeError(phase)`,
 
 ## Not implemented
 
-- TLS 1.2 fallback — the client speaks TLS 1.3 only
 - Post-handshake messages (NewSessionTicket, KeyUpdate)
 - Session resumption / PSK / 0-RTT
 - Mutual TLS (client certificate)

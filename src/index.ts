@@ -9,6 +9,10 @@
 export { connectTls, TlsConnectionImpl, generateKeyShares } from "./tls.js";
 export type { TlsConnection } from "./types.js";
 
+// Re-export the CryptoProvider type so consumers can inject a custom provider
+// via TlsOptions without importing @browsercore/crypto directly.
+export type { CryptoProvider } from "@browsercore/crypto";
+
 export {
     TlsError,
     TlsHandshakeError,
@@ -24,7 +28,9 @@ export {
     type CipherSuite,
     type ClientHelloConfig,
     type CloseReason,
+    type Clock,
     type KeyPair,
+    type Logger,
     type NamedGroup,
     type ProtocolVersion,
     type SignatureScheme,
@@ -34,6 +40,9 @@ export {
     type TrafficSecrets,
     TLS_1_2,
     TLS_1_3,
+    systemClock,
+    devLogger,
+    silentLogger,
 } from "./types.js";
 
 export { type TlsProfile, MODERN_TLS13_PROFILE, COMPATIBILITY_PROFILE, getProfile, resolveProfile } from "./profiles/profiles.js";

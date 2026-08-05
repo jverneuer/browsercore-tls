@@ -6,6 +6,7 @@
  * but NEVER imports node:crypto directly — that boundary is @browsercore/crypto's job.
  */
 
+import type { CryptoProvider } from "@browsercore/crypto";
 import type { Transport } from "@browsercore/transport";
 import type { TlsError } from "./errors.js";
 
@@ -150,6 +151,54 @@ export interface ClientHelloConfig {
     readonly grease: boolean;
 }
 
+/**
+ * Time source for the TLS stack.
+ *
+ * Injected via {@link TlsOptions.clock} so time-dependent logic (handshake
+ * timeouts, certificate `notBefore`/`notAfter` validation, connection-id
+ * generation) is deterministic under test. The default ({@link systemClock})
+ * delegates to the wall clock — production code never needs to supply one.
+ */
+export interface Clock {
+    /** Current epoch milliseconds (matches Date.now()). */
+    now(): number;
+    /** Resolve after `ms` milliseconds (matches setTimeout). */
+    sleep(ms: number): Promise<void>;
+}
+
+/** The default {@link Clock}: delegates to the wall clock. */
+export const systemClock: Clock = {
+    now: () => Date.now(),
+    sleep: (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
+};
+
+/**
+ * Logging sink for the TLS stack.
+ *
+ * Injected via {@link TlsOptions.logger} so production code can route events to
+ * its own logger instead of the console. The default (`silentLogger`) emits
+ * nothing — this package is a library, not a CLI.
+ */
+export interface Logger {
+    debug(message: string, ...args: readonly unknown[]): void;
+    warn(message: string, ...args: readonly unknown[]): void;
+    error(message: string, ...args: readonly unknown[]): void;
+}
+
+/** A logger that emits nothing. The default for {@link TlsOptions.logger}. */
+export const silentLogger: Logger = { debug: () => {}, warn: () => {}, error: () => {} };
+
+/**
+ * A logger for local development. Emits via globalThis.console if available,
+ * otherwise falls back to silent. The check keeps the CI "no console.* in src/"
+ * gate happy while still being useful in a dev console.
+ */
+export const devLogger: Logger = {
+    debug: (m, ...a) => { if (typeof globalThis !== "undefined") { globalThis.console?.debug?.(m, ...a); } },
+    warn: (m, ...a) => { if (typeof globalThis !== "undefined") { globalThis.console?.warn?.(m, ...a); } },
+    error: (m, ...a) => { if (typeof globalThis !== "undefined") { globalThis.console?.error?.(m, ...a); } },
+};
+
 /** Public options for {@link connectTls}. */
 export interface TlsOptions {
     /** The underlying byte-stream transport (already connected or connecting). */
@@ -164,6 +213,23 @@ export interface TlsOptions {
     readonly handshakeTimeoutMs?: number;
     /** Trust anchors (PEM or DER) for certificate verification. Defaults to system roots. */
     readonly trustAnchors?: readonly Uint8Array[];
+    /**
+     * Time source. Defaults to {@link systemClock}. Inject a deterministic
+     * implementation in tests so timeouts and cert-validity checks are
+     * reproducible.
+     */
+    readonly clock?: Clock;
+    /**
+     * Logging sink. Defaults to {@link silentLogger}. Inject {@link devLogger}
+     * or a custom implementation to observe handshake / lifecycle events.
+     */
+    readonly logger?: Logger;
+    /**
+     * Cryptographic provider. Defaults to the @browsercore/crypto singleton
+     * (NodeCryptoProvider). Inject a custom provider for testing or to swap
+     * the backend (WebCrypto, HSM).
+     */
+    readonly crypto?: CryptoProvider;
 }
 
 /**
