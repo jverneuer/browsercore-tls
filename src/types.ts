@@ -70,7 +70,9 @@ export type NamedGroup =
     | "secp256r1"
     | "secp384r1"
     | "x25519"
-    | "x448";
+    | "x448"
+    | "X25519MLKEM768"
+    | "X25519Kyber768";
 
 /**
  * Signature algorithms for certificate verification.

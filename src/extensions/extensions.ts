@@ -18,7 +18,8 @@ export const ExtensionType = {
     SIGNATURE_ALGORITHMS: 13,
     USE_SRTP: 14,
     APPLICATION_LAYER_PROTOCOL_NEGOTIATION: 16,
-    APPLICATION_SETTINGS: 17513,
+    APPLICATION_SETTINGS: 17613,
+    ENCRYPTED_CLIENT_HELLO: 65037,
     SIGNED_CERTIFICATE_TIMESTAMP: 18,
     EXTENDED_MASTER_SECRET: 23,
     COMPRESS_CERTIFICATE: 27,
@@ -167,6 +168,10 @@ export function namedGroupToWire(group: NamedGroup): number {
             return 0x001d;
         case "x448":
             return 0x001e;
+        case "X25519MLKEM768":
+            return 0x11ec;
+        case "X25519Kyber768":
+            return 0x6399;
         default:
             return assertNever(group);
     }
@@ -183,6 +188,10 @@ export function wireToNamedGroup(wire: number): NamedGroup {
             return "x25519";
         case 0x001e:
             return "x448";
+        case 0x11ec:
+            return "X25519MLKEM768";
+        case 0x6399:
+            return "X25519Kyber768";
         default:
             throw new TlsHandshakeError("server_hello", {
                 cause: new Error(`unsupported named group wire value: 0x${wire.toString(16)}`),
@@ -212,6 +221,7 @@ export function wireToExtensionType(wire: number): ExtensionType {
         case ExtensionType.USE_SRTP:
         case ExtensionType.APPLICATION_LAYER_PROTOCOL_NEGOTIATION:
         case ExtensionType.APPLICATION_SETTINGS:
+        case ExtensionType.ENCRYPTED_CLIENT_HELLO:
         case ExtensionType.SIGNED_CERTIFICATE_TIMESTAMP:
         case ExtensionType.EXTENDED_MASTER_SECRET:
         case ExtensionType.COMPRESS_CERTIFICATE:

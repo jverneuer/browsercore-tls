@@ -102,6 +102,11 @@ export function isKeyShareGroup(group: NamedGroup): boolean {
         case "x25519":
         case "x448":
             return true;
+        case "X25519MLKEM768":
+        case "X25519Kyber768":
+            // Post-quantum hybrid groups: the crypto backend does not (yet)
+            // implement the hybrid key exchange, so these are not usable here.
+            return false;
         default:
             return assertNever(group);
     }

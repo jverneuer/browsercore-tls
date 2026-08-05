@@ -13,6 +13,7 @@ import {
     signatureSchemeToWire,
     namedGroupToWire,
     wireToNamedGroup,
+    wireToExtensionType,
 } from "../src/extensions/extensions.js";
 import { TlsHandshakeError } from "../src/errors.js";
 import type { NamedGroup, SignatureScheme } from "../src/types.js";
@@ -144,6 +145,8 @@ describe("namedGroupToWire", () => {
             ["secp384r1", 0x0018],
             ["x25519", 0x001d],
             ["x448", 0x001e],
+            ["X25519MLKEM768", 0x11ec],
+            ["X25519Kyber768", 0x6399],
         ];
         for (const [group, wire] of cases) {
             expect(namedGroupToWire(group)).toBe(wire);
@@ -157,6 +160,8 @@ describe("wireToNamedGroup", () => {
         expect(wireToNamedGroup(0x0018)).toBe("secp384r1");
         expect(wireToNamedGroup(0x001d)).toBe("x25519");
         expect(wireToNamedGroup(0x001e)).toBe("x448");
+        expect(wireToNamedGroup(0x11ec)).toBe("X25519MLKEM768");
+        expect(wireToNamedGroup(0x6399)).toBe("X25519Kyber768");
     });
 
     it("throws TlsHandshakeError for an unsupported wire value", () => {
@@ -168,6 +173,32 @@ describe("wireToNamedGroup", () => {
             expect(err.phase).toBe("server_hello");
             expect(err.cause?.message).toMatch(/unsupported named group/);
         }
+    });
+
+    it("round-trips every named group through namedGroupToWire and wireToNamedGroup", () => {
+        const groups: readonly NamedGroup[] = [
+            "secp256r1",
+            "secp384r1",
+            "x25519",
+            "x448",
+            "X25519MLKEM768",
+            "X25519Kyber768",
+        ];
+        for (const group of groups) {
+            expect(wireToNamedGroup(namedGroupToWire(group))).toBe(group);
+        }
+    });
+});
+
+describe("wireToExtensionType (chrome-140 new types)", () => {
+    it("accepts application_settings at the renumbered value 17613", () => {
+        expect(() => wireToExtensionType(17613)).not.toThrow();
+        expect(wireToExtensionType(17613)).toBe(ExtensionType.APPLICATION_SETTINGS);
+    });
+
+    it("accepts encrypted_client_hello at 65037", () => {
+        expect(() => wireToExtensionType(65037)).not.toThrow();
+        expect(wireToExtensionType(65037)).toBe(ExtensionType.ENCRYPTED_CLIENT_HELLO);
     });
 });
 

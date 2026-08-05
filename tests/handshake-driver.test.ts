@@ -20,7 +20,7 @@ import { TlsServerSim } from "./server-sim.js";
 const PROFILE: ClientHelloConfig = {
     cipherSuites: ["TLS_AES_128_GCM_SHA256"],
     extensionOrder: [
-        0, 10, 11, 13, 16, 17513, 18, 23, 27, 35, 41, 43, 45, 5, 51, 65281,
+        0, 10, 11, 13, 16, 17613, 18, 23, 27, 35, 41, 43, 45, 5, 51, 65281,
     ],
     keyShareGroups: ["x25519"],
     signatureAlgorithms: ["ecdsa_secp256r1_sha256"],
