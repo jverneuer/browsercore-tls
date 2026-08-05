@@ -47,7 +47,15 @@ export {
 } from "./record/record.js";
 export type { ContentType as TlsContentType, RecordHeader, TlsRecord } from "./record/record.js";
 
-export { HandshakeType, buildClientHello, parseServerHello, cipherSuiteToWire } from "./handshake/handshake.js";
+export {
+    HandshakeType,
+    buildClientHello,
+    parseServerHello,
+    cipherSuiteToWire,
+    GREASE_VALUES,
+    generateGreaseValue,
+    isGreaseValue,
+} from "./handshake/handshake.js";
 export type {
     ClientHello,
     ServerHello,

@@ -25,7 +25,13 @@ export {
     type ServerHello,
     type HandshakePhase,
 } from "./handshake-types.js";
-export { buildClientHello, cipherSuiteToWire } from "./client-hello.js";
+export {
+    buildClientHello,
+    cipherSuiteToWire,
+    GREASE_VALUES,
+    generateGreaseValue,
+    isGreaseValue,
+} from "./client-hello.js";
 export { parseServerHello, type ServerHelloValidation } from "./server-hello.js";
 export {
     advanceHandshake,
