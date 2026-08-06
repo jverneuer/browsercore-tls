@@ -216,7 +216,7 @@ export function wireToExtensionType(wire: number): ExtensionType {
 }
 
 /** A GREASE value follows the 0x?a?a pattern (byte 0x?a repeated), per RFC 8701. */
-function isGreaseValue(type: number): boolean {
+export function isGreaseValue(type: number): boolean {
     const hi = (type >> 8) & 0xff;
     const lo = type & 0xff;
     return type > 0 && hi === lo && (lo & 0x0f) === 0x0a;

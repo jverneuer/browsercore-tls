@@ -18,7 +18,8 @@ import type {
     SignatureScheme,
 } from "../types.js";
 import { TlsHandshakeError } from "../errors.js";
-import { ExtensionType, namedGroupToWire, signatureSchemeToWire } from "../extensions/extensions.js";
+import { ExtensionType, isGreaseValue, namedGroupToWire, signatureSchemeToWire } from "../extensions/extensions.js";
+export { isGreaseValue } from "../extensions/extensions.js";
 import { HandshakeType } from "./handshake-types.js";
 import { CIPHER_SUITE_CODES } from "../iana/index.js";
 
@@ -256,16 +257,6 @@ function encodeExtensionBody(
                 cause: new Error(`no encoder for extension type 0x${type.toString(16)}`),
             });
     }
-}
-
-/**
- * A GREASE value follows the 0x?a?a pattern (byte 0x? a repeated), per RFC 8701.
- * Both bytes are identical and each byte's low nibble is 0xa.
- */
-export function isGreaseValue(type: number): boolean {
-    const hi = (type >> 8) & 0xff;
-    const lo = type & 0xff;
-    return type > 0 && hi === lo && (lo & 0x0f) === 0x0a;
 }
 
 function encodeSupportedGroups(groups: readonly NamedGroup[]): Uint8Array {

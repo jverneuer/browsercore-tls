@@ -264,16 +264,17 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
         }
     }
 
-    public write(data: Uint8Array): Promise<void> {
-        // Not async: there are no awaits. Synchronous throws (e.g. ensureOpen) are
-        // caught and returned as a rejected promise so callers can await uniformly.
+    public async write(data: Uint8Array): Promise<void> {
         try {
             ensureOpen(this.state);
             const traffic = this.applicationSecrets.client;
             // Split into record-sized plaintext fragments (TLS records cap at 2^14 bytes).
             for (let offset = 0; offset < data.length; offset += 16_384) {
                 const fragment = data.subarray(offset, Math.min(offset + 16_384, data.length));
-                writeEncryptedRecord(
+                // Sequential by necessity: each record carries a monotonically
+                // increasing sequence number, so the writes cannot be parallelized.
+                // eslint-disable-next-line no-await-in-loop
+                await writeEncryptedRecord(
                     this.transport,
                     this.aead,
                     traffic,
@@ -284,9 +285,8 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
                 );
                 this.clientAppSeq++;
             }
-            return Promise.resolve();
         } catch (cause) {
-            return Promise.reject(ensureTlsError(cause));
+            throw ensureTlsError(cause);
         }
     }
 
@@ -300,7 +300,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
         if (this.state.state === "open") {
             try {
                 const alert = new Uint8Array([0x01, 0x00]); // warning / close_notify
-                writeEncryptedRecord(
+                await writeEncryptedRecord(
                     this.transport,
                     this.aead,
                     this.applicationSecrets.client,
