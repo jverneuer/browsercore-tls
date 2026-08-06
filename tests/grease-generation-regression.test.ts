@@ -101,14 +101,14 @@ function greasedConfig(): ClientHelloConfig {
 describe("Every ClientHello (grease=true) contains GREASE in cipher suites", () => {
     it("prepends a GREASE cipher suite (0x0a0a) at the front of the offered list", async () => {
         // Pin the per-connection sentinel deterministically (random()=0.0 -> 0x0a0a).
-        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0);
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0, crypto);
         const suites = parseCipherSuites(hello);
         expect(suites.length).toBeGreaterThan(0);
         expect(suites[0]).toBe(CANONICAL_GREASE);
     });
 
     it("prepends a GREASE value matching the RFC 8701 0x?a?a pattern", async () => {
-        const hello = buildClientHello(greasedConfig(), await x25519KeyPair());
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => Math.random(), crypto);
         const suites = parseCipherSuites(hello);
         expect(isGreasePattern(suites[0]!)).toBe(true);
     });
@@ -116,7 +116,7 @@ describe("Every ClientHello (grease=true) contains GREASE in cipher suites", () 
     it("places GREASE first even when the profile omits TLS_GREASE_RESERVED_0", async () => {
         // The profile here does NOT list TLS_GREASE_RESERVED_0 — yet the encoder
         // must still prepend the canonical GREASE sentinel when grease=true.
-        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0);
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0, crypto);
         const suites = parseCipherSuites(hello);
         expect(suites[0]).toBe(CANONICAL_GREASE);
         // The real ciphers follow the GREASE sentinel.
@@ -128,7 +128,7 @@ describe("Every ClientHello (grease=true) contains GREASE in cipher suites", () 
             ...greasedConfig(),
             cipherSuites: ["TLS_AES_128_GCM_SHA256"],
         };
-        const hello = buildClientHello(cfg, await x25519KeyPair(), () => 0.0);
+        const hello = buildClientHello(cfg, await x25519KeyPair(), () => 0.0, crypto);
         const suites = parseCipherSuites(hello);
         expect(suites[0]).toBe(CANONICAL_GREASE);
         expect(suites).toHaveLength(2); // GREASE + the single real suite
@@ -137,26 +137,26 @@ describe("Every ClientHello (grease=true) contains GREASE in cipher suites", () 
 
 describe("Every ClientHello (grease=true) contains a GREASE extension", () => {
     it("prepends a GREASE extension (type 0x0a0a) ahead of the profile order", async () => {
-        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0);
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0, crypto);
         const extensions = parseExtensions(hello);
         expect(extensions.length).toBeGreaterThan(0);
         expect(extensions[0]!.type).toBe(CANONICAL_GREASE);
     });
 
     it("the GREASE extension type matches the RFC 8701 0x?a?a pattern", async () => {
-        const hello = buildClientHello(greasedConfig(), await x25519KeyPair());
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => Math.random(), crypto);
         const extensions = parseExtensions(hello);
         expect(isGreasePattern(extensions[0]!.type)).toBe(true);
     });
 
     it("the GREASE extension body is empty (GREASE has no payload)", async () => {
-        const hello = buildClientHello(greasedConfig(), await x25519KeyPair());
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => Math.random(), crypto);
         const extensions = parseExtensions(hello);
         expect(extensions[0]!.data.length).toBe(0);
     });
 
     it("the profile's extensions follow the GREASE extension in order", async () => {
-        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0);
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0, crypto);
         const extensions = parseExtensions(hello);
         const types = extensions.map((e) => e.type);
         expect(types[0]).toBe(CANONICAL_GREASE);
@@ -166,7 +166,7 @@ describe("Every ClientHello (grease=true) contains a GREASE extension", () => {
 
 describe("Every ClientHello (grease=true) contains a GREASE key share", () => {
     it("prepends a GREASE key-share group (0x0a0a) in the key_share extension", async () => {
-        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0);
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0, crypto);
         const extensions = parseExtensions(hello);
         const ks = extensions.find((e) => e.type === ExtensionType.KEY_SHARE);
         expect(ks).toBeDefined();
@@ -176,7 +176,7 @@ describe("Every ClientHello (grease=true) contains a GREASE key share", () => {
     });
 
     it("the GREASE key-share group matches the RFC 8701 0x?a?a pattern", async () => {
-        const hello = buildClientHello(greasedConfig(), await x25519KeyPair());
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => Math.random(), crypto);
         const extensions = parseExtensions(hello);
         const ks = extensions.find((e) => e.type === ExtensionType.KEY_SHARE);
         const firstGroup = ((ks!.data[2] ?? 0) << 8) | (ks!.data[3] ?? 0);
@@ -184,7 +184,7 @@ describe("Every ClientHello (grease=true) contains a GREASE key share", () => {
     });
 
     it("the real key-share groups follow the GREASE group", async () => {
-        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0);
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0, crypto);
         const extensions = parseExtensions(hello);
         const ks = extensions.find((e) => e.type === ExtensionType.KEY_SHARE)!;
         // GREASE group at offset 2, real group right after (GREASE key is 32 bytes).
@@ -204,7 +204,7 @@ describe("No GREASE is generated when grease=false (Firefox-style)", () => {
     }
 
     it("does not prepend a GREASE cipher suite", async () => {
-        const hello = buildClientHello(firefoxConfig(), await x25519KeyPair());
+        const hello = buildClientHello(firefoxConfig(), await x25519KeyPair(), () => Math.random(), crypto);
         const suites = parseCipherSuites(hello);
         expect(suites[0]).not.toBe(CANONICAL_GREASE);
         expect(isGreasePattern(suites[0]!)).toBe(false);
@@ -212,7 +212,7 @@ describe("No GREASE is generated when grease=false (Firefox-style)", () => {
     });
 
     it("does not prepend a GREASE extension", async () => {
-        const hello = buildClientHello(firefoxConfig(), await x25519KeyPair());
+        const hello = buildClientHello(firefoxConfig(), await x25519KeyPair(), () => Math.random(), crypto);
         const extensions = parseExtensions(hello);
         expect(extensions[0]!.type).not.toBe(CANONICAL_GREASE);
         expect(isGreasePattern(extensions[0]!.type)).toBe(false);
@@ -220,7 +220,7 @@ describe("No GREASE is generated when grease=false (Firefox-style)", () => {
     });
 
     it("does not prepend a GREASE key-share group", async () => {
-        const hello = buildClientHello(firefoxConfig(), await x25519KeyPair());
+        const hello = buildClientHello(firefoxConfig(), await x25519KeyPair(), () => Math.random(), crypto);
         const extensions = parseExtensions(hello);
         const ks = extensions.find((e) => e.type === ExtensionType.KEY_SHARE)!;
         const firstGroup = ((ks.data[2] ?? 0) << 8) | (ks.data[3] ?? 0);

@@ -11,7 +11,15 @@
  * the two steps independently (the extract output feeds the next stage's salt).
  */
 
-import { crypto, SHA_256, SHA_384, type CryptoProvider, type HashId } from "@browsercore/crypto";
+import type { CryptoProvider, HashId } from "@browsercore/crypto";
+
+/**
+ * Hash identifiers for the two TLS 1.3 transcript hashes, as {@link HashId}
+ * literals. Defined locally so this module has no runtime dependency on
+ * @browsercore/crypto — it consumes only the CryptoProvider interface.
+ */
+const SHA_256: HashId = "SHA-256" as HashId;
+const SHA_384: HashId = "SHA-384" as HashId;
 import type {
     ApplicationTrafficSecrets,
     CipherSuite,
@@ -141,7 +149,7 @@ export function hashFor(cipherSuite: CipherSuite): HashId {
  * HKDF-Extract(salt, Ikm) = HMAC-Hash(salt, Ikm), per RFC 5869 §2.3.
  * The output is exactly {@link hashLengthFor}(hash) bytes.
  */
-function hkdfExtract(hash: HashId, salt: Uint8Array, ikm: Uint8Array, provider: CryptoProvider = crypto): Uint8Array {
+function hkdfExtract(hash: HashId, salt: Uint8Array, ikm: Uint8Array, provider: CryptoProvider): Uint8Array {
     return provider.hmac(hash, salt, ikm);
 }
 
@@ -149,7 +157,7 @@ function hkdfExtract(hash: HashId, salt: Uint8Array, ikm: Uint8Array, provider: 
  * HKDF-Expand(PRK, info, length) per RFC 5869 §2.3, implemented on top of HMAC
  * because @browsercore/crypto exposes only the combined extract+expand helper.
  */
-function hkdfExpand(hash: HashId, prk: Uint8Array, info: Uint8Array, length: number, provider: CryptoProvider = crypto): Uint8Array {
+function hkdfExpand(hash: HashId, prk: Uint8Array, info: Uint8Array, length: number, provider: CryptoProvider): Uint8Array {
     const hashLen = hashLengthFor(hash);
     const n = Math.ceil(length / hashLen);
     if (n > 255) {
@@ -182,7 +190,7 @@ export function hkdfExpandLabel(
     context: Uint8Array,
     length: number,
     hash: HashId,
-    provider: CryptoProvider = crypto,
+    provider: CryptoProvider,
 ): Uint8Array {
     const prefix = "tls13 ";
     const labelBytes = new TextEncoder().encode(prefix + label);
@@ -210,7 +218,7 @@ export function deriveTrafficSecrets(
     trafficSecret: Uint8Array,
     cipherSuite: CipherSuite,
     hash: HashId,
-    provider: CryptoProvider = crypto,
+    provider: CryptoProvider,
 ): TrafficSecrets {
     const key = hkdfExpandLabel(trafficSecret, "key", new Uint8Array(0), cipherSuiteKeyLength(cipherSuite), hash, provider);
     const iv = hkdfExpandLabel(trafficSecret, "iv", new Uint8Array(0), cipherSuiteIvLength(cipherSuite), hash, provider)
@@ -235,7 +243,7 @@ export function deriveHandshakeTrafficSecrets(
     sharedSecret: Uint8Array,
     helloTranscript: Uint8Array,
     cipherSuite: CipherSuite,
-    provider: CryptoProvider = crypto,
+    provider: CryptoProvider,
 ): {
     masterSecret: Uint8Array;
     clientTrafficSecret: Uint8Array;
@@ -280,7 +288,7 @@ export function deriveHandshakeSecrets(
     sharedSecret: Uint8Array,
     helloTranscript: Uint8Array,
     cipherSuite: CipherSuite,
-    provider: CryptoProvider = crypto,
+    provider: CryptoProvider,
 ): {
     masterSecret: Uint8Array;
     traffic: ApplicationTrafficSecrets;
@@ -314,7 +322,7 @@ export function deriveApplicationSecrets(
     masterSecret: Uint8Array,
     handshakeTranscript: Uint8Array,
     cipherSuite: CipherSuite,
-    provider: CryptoProvider = crypto,
+    provider: CryptoProvider,
 ): ApplicationTrafficSecrets {
     const hash = cipherSuiteToHash(cipherSuite);
     const hashLen = hashLengthFor(hash);
@@ -337,7 +345,7 @@ export function deriveApplicationSecrets(
  * @param currentSecret The current application traffic secret (Hash.length bytes).
  * @param cipherSuite   Negotiated cipher suite (selects hash + AEAD sizes).
  */
-export function updateTrafficSecrets(currentSecret: Uint8Array, cipherSuite: CipherSuite, provider: CryptoProvider = crypto): TrafficSecrets {
+export function updateTrafficSecrets(currentSecret: Uint8Array, cipherSuite: CipherSuite, provider: CryptoProvider): TrafficSecrets {
     const hash = cipherSuiteToHash(cipherSuite);
     const hashLen = hashLengthFor(hash);
     const nextSecret = hkdfExpandLabel(currentSecret, "traffic upd", new Uint8Array(0), hashLen, hash, provider);

@@ -56,15 +56,15 @@ describe("cipher-suite size mappings", () => {
 describe("hkdfExpandLabel", () => {
     it("produces exactly `length` bytes", () => {
         const secret = crypto.randomBytes(32);
-        const out = hkdfExpandLabel(secret, "key", new Uint8Array(0), 42, SHA_256);
+        const out = hkdfExpandLabel(secret, "key", new Uint8Array(0), 42, SHA_256, crypto);
         expect(out.length).toBe(42);
     });
 
     it("is deterministic for a fixed secret/label/context", () => {
         const secret = new Uint8Array(32).fill(0x11);
         const ctx = new Uint8Array([0xaa, 0xbb]);
-        const a = hkdfExpandLabel(secret, "iv", ctx, 12, SHA_256);
-        const b = hkdfExpandLabel(secret, "iv", ctx, 12, SHA_256);
+        const a = hkdfExpandLabel(secret, "iv", ctx, 12, SHA_256, crypto);
+        const b = hkdfExpandLabel(secret, "iv", ctx, 12, SHA_256, crypto);
         expect(a).toEqual(b);
     });
 });
@@ -72,7 +72,7 @@ describe("hkdfExpandLabel", () => {
 describe("deriveTrafficSecrets", () => {
     it("derives a key and IV of the cipher-suite-specified sizes", () => {
         const trafficSecret = crypto.randomBytes(32);
-        const secrets = deriveTrafficSecrets(trafficSecret, "TLS_AES_256_GCM_SHA384", SHA_384);
+        const secrets = deriveTrafficSecrets(trafficSecret, "TLS_AES_256_GCM_SHA384", SHA_384, crypto);
         expect(secrets.key.length).toBe(32);
         expect(secrets.iv.length).toBe(12);
     });
@@ -86,6 +86,7 @@ describe("deriveHandshakeSecrets", () => {
             sharedSecret,
             helloTranscript,
             "TLS_AES_128_GCM_SHA256",
+            crypto,
         );
         // Master secret length equals the hash length (32 for SHA-256).
         expect(masterSecret.length).toBe(32);
@@ -102,6 +103,7 @@ describe("deriveHandshakeSecrets", () => {
             sharedSecret,
             helloTranscript,
             "TLS_AES_256_GCM_SHA384",
+            crypto,
         );
         expect(masterSecret.length).toBe(48);
         expect(traffic.client.key.length).toBe(32);
@@ -112,7 +114,7 @@ describe("deriveApplicationSecrets", () => {
     it("derives client and server application traffic secrets from the master secret", () => {
         const masterSecret = crypto.randomBytes(32);
         const handshakeTranscript = crypto.sha256(new Uint8Array([0x09]));
-        const app = deriveApplicationSecrets(masterSecret, handshakeTranscript, "TLS_AES_128_GCM_SHA256");
+        const app = deriveApplicationSecrets(masterSecret, handshakeTranscript, "TLS_AES_128_GCM_SHA256", crypto);
         expect(app.client.key.length).toBe(16);
         expect(app.client.iv.length).toBe(12);
         expect(app.server.key.length).toBe(16);
@@ -123,7 +125,7 @@ describe("deriveApplicationSecrets", () => {
 describe("updateTrafficSecrets (KeyUpdate)", () => {
     it("re-derives fresh key/iv from the current traffic secret", () => {
         const currentSecret = crypto.randomBytes(32);
-        const next = updateTrafficSecrets(currentSecret, "TLS_AES_128_GCM_SHA256");
+        const next = updateTrafficSecrets(currentSecret, "TLS_AES_128_GCM_SHA256", crypto);
         expect(next.key.length).toBe(16);
         expect(next.iv.length).toBe(12);
         // The new secret must differ from a trivial re-use of the input.
@@ -168,7 +170,7 @@ describe("hashLength exhaustiveness guard", () => {
         // default at runtime (the type system would reject it at compile time).
         const bogus = "SHA-999" as unknown as HashId;
         expect(() =>
-            hkdfExpandLabel(crypto.randomBytes(32), "key", new Uint8Array(0), 16, bogus),
+            hkdfExpandLabel(crypto.randomBytes(32), "key", new Uint8Array(0), 16, bogus, crypto),
         ).toThrow(/Unexpected value/);
     });
 });
@@ -177,7 +179,7 @@ describe("HKDF-Expand length overflow guard", () => {
     it("throws when the requested length exceeds 255 * hashLen", () => {
         const secret = crypto.randomBytes(32);
         // SHA-256 hashLen = 32, so the max is 255 * 32 = 8160.
-        expect(() => hkdfExpandLabel(secret, "key", new Uint8Array(0), 8161, SHA_256)).toThrow(
+        expect(() => hkdfExpandLabel(secret, "key", new Uint8Array(0), 8161, SHA_256, crypto)).toThrow(
             /exceeds maximum/,
         );
     });

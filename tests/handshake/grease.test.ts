@@ -184,7 +184,7 @@ describe("generateGreaseValue", () => {
 
     it("always returns a value from GREASE_VALUES (default crypto random)", () => {
         for (let i = 0; i < 100; i++) {
-            expect(GREASE_VALUES).toContain(generateGreaseValue());
+            expect(GREASE_VALUES).toContain(generateGreaseValue(Math.random));
         }
     });
 
@@ -201,7 +201,7 @@ describe("GREASE variation across connections (RFC 8701)", () => {
         const kps = await makeKeyPairs();
         const seen = new Set<number>();
         for (let i = 0; i < 100; i++) {
-            const hello = buildClientHello(config, kps);
+            const hello = buildClientHello(config, kps, () => Math.random(), crypto);
             const first = firstCipherWire(hello);
             expect(GREASE_VALUES).toContain(first);
             seen.add(first);
@@ -216,7 +216,7 @@ describe("GREASE reuses one value across cipher, extension, and key-share", () =
         const config = chrome140Config();
         const kps = await makeKeyPairs();
         // Pin the sentinel deterministically (random()=0.0 -> 0x0a0a).
-        const hello = buildClientHello(config, kps, fixedRandom(0.0));
+        const hello = buildClientHello(config, kps, fixedRandom(0.0), crypto);
 
         const cipher = firstCipherWire(hello);
         const ext = firstExtensionType(hello);
@@ -233,7 +233,7 @@ describe("GREASE reuses one value across cipher, extension, and key-share", () =
         const config = chrome140Config();
         const kps = await makeKeyPairs();
         // random()=0.5 -> MID_GREASE (0x8a8a) in every slot.
-        const hello = buildClientHello(config, kps, fixedRandom(0.5));
+        const hello = buildClientHello(config, kps, fixedRandom(0.5), crypto);
 
         expect(firstCipherWire(hello)).toBe(MID_GREASE);
         expect(firstExtensionType(hello)).toBe(MID_GREASE);
@@ -251,7 +251,7 @@ describe("GREASE reuses one value across cipher, extension, and key-share", () =
             grease: false,
         };
         const kps = await makeKeyPairs();
-        const hello = buildClientHello(config, kps);
+        const hello = buildClientHello(config, kps, () => Math.random(), crypto);
 
         // First cipher is the real suite, not a GREASE sentinel.
         const cipher = firstCipherWire(hello);

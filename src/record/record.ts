@@ -6,7 +6,7 @@
  * payload is delegated to @browsercore/crypto — this module owns framing only.
  */
 
-import { crypto, type CryptoProvider } from "@browsercore/crypto";
+import type { CryptoProvider } from "@browsercore/crypto";
 import type { AeadAlgorithm, CipherSuite } from "../types.js";
 import { NotImplementedError, TlsDecryptError } from "../errors.js";
 import { assertNever } from "../utils.js";
@@ -188,7 +188,7 @@ export function encryptRecord(
     nonce: Uint8Array,
     additionalData: Uint8Array,
     algorithm: AeadAlgorithm,
-    provider: CryptoProvider = crypto,
+    provider: CryptoProvider,
 ): Uint8Array {
     switch (algorithm) {
         case "AES-128-GCM":
@@ -223,7 +223,7 @@ export function decryptRecord(
     nonce: Uint8Array,
     additionalData: Uint8Array,
     algorithm: AeadAlgorithm,
-    provider: CryptoProvider = crypto,
+    provider: CryptoProvider,
 ): Uint8Array {
     try {
         switch (algorithm) {

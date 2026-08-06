@@ -20,7 +20,7 @@
  * this file focused on the public surface.
  */
 
-import { crypto, type CryptoProvider, type HashId } from "@browsercore/crypto";
+import type { CryptoProvider, HashId } from "@browsercore/crypto";
 import type { Transport } from "@browsercore/transport";
 import {
     systemClock,
@@ -72,14 +72,14 @@ const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
  * groups, signature algorithms).
  */
 export async function connectTls(options: TlsOptions): Promise<TlsConnection> {
-    const provider = options.crypto ?? crypto;
+    const provider = options.crypto;
     const conn = new TlsConnectionImpl(options, provider);
     await conn.handshake();
     return conn;
 }
 
 /** Generate key shares for the requested groups (delegates to @browsercore/crypto). */
-export function generateKeyShares(groups: readonly string[], provider: CryptoProvider = crypto): Promise<KeyPair[]> {
+export function generateKeyShares(groups: readonly string[], provider: CryptoProvider): Promise<KeyPair[]> {
     // Wrapped in .then() so a synchronous throw (unsupported group) becomes a
     // rejected promise — callers await this and tests assert with .rejects.
     return Promise.resolve().then(() => {
@@ -153,7 +153,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
     private readonly clock: Clock;
     /** Logging sink (defaults to silentLogger). Injected via TlsOptions. */
     private readonly logger: Logger;
-    /** Cryptographic provider (defaults to the @browsercore/crypto singleton). */
+    /** Cryptographic provider, injected via the constructor (never defaulted). */
     public readonly crypto!: CryptoProvider;
 
     // --- HandshakeContext: mutable handshake state (read/written by the driver) ---
@@ -183,8 +183,9 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
 
     // `options` is optional so a connection can be constructed in isolation (e.g.
     // to assert on its default public fields) without a live transport. The real
-    // entry point, connectTls, always supplies a full options object.
-    constructor(options?: TlsOptions, provider: CryptoProvider = crypto) {
+    // entry point, connectTls, always supplies a full options object. `provider`
+    // is required — pure dependency injection, no fallback singleton.
+    constructor(options: TlsOptions | undefined, provider: CryptoProvider) {
         // The clock defaults to the wall clock so production code never needs to
         // supply one. Assigned here (before the options guard) so both the no-arg
         // and full-options paths share the same default.

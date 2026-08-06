@@ -85,9 +85,9 @@ describe("encryptRecord / decryptRecord round-trip", () => {
         const { key, nonce } = keyNonceFor("AES-128-GCM");
         const plaintext = new TextEncoder().encode("hello aes-128-gcm");
         const aad = serializeRecordHeader(23, plaintext.length + 16);
-        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-128-GCM");
+        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-128-GCM", crypto);
         expect(ciphertext.length).toBe(plaintext.length + 16); // + tag
-        const recovered = decryptRecord(ciphertext, key, nonce, aad, "AES-128-GCM");
+        const recovered = decryptRecord(ciphertext, key, nonce, aad, "AES-128-GCM", crypto);
         expect(recovered).toEqual(plaintext);
     });
 
@@ -95,8 +95,8 @@ describe("encryptRecord / decryptRecord round-trip", () => {
         const { key, nonce } = keyNonceFor("AES-256-GCM");
         const plaintext = new TextEncoder().encode("hello aes-256-gcm");
         const aad = serializeRecordHeader(23, plaintext.length + 16);
-        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-256-GCM");
-        const recovered = decryptRecord(ciphertext, key, nonce, aad, "AES-256-GCM");
+        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-256-GCM", crypto);
+        const recovered = decryptRecord(ciphertext, key, nonce, aad, "AES-256-GCM", crypto);
         expect(recovered).toEqual(plaintext);
     });
 
@@ -104,8 +104,8 @@ describe("encryptRecord / decryptRecord round-trip", () => {
         const { key, nonce } = keyNonceFor("CHACHA20-POLY1305");
         const plaintext = new TextEncoder().encode("hello chacha20-poly1305");
         const aad = serializeRecordHeader(23, plaintext.length + 16);
-        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "CHACHA20-POLY1305");
-        const recovered = decryptRecord(ciphertext, key, nonce, aad, "CHACHA20-POLY1305");
+        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "CHACHA20-POLY1305", crypto);
+        const recovered = decryptRecord(ciphertext, key, nonce, aad, "CHACHA20-POLY1305", crypto);
         expect(recovered).toEqual(plaintext);
     });
 
@@ -113,9 +113,9 @@ describe("encryptRecord / decryptRecord round-trip", () => {
         const { key, nonce } = keyNonceFor("AES-128-CCM");
         const plaintext = new TextEncoder().encode("hello aes-128-ccm");
         const aad = serializeRecordHeader(23, plaintext.length + 16);
-        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-128-CCM");
+        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-128-CCM", crypto);
         expect(ciphertext.length).toBe(plaintext.length + 16); // + tag
-        const recovered = decryptRecord(ciphertext, key, nonce, aad, "AES-128-CCM");
+        const recovered = decryptRecord(ciphertext, key, nonce, aad, "AES-128-CCM", crypto);
         expect(recovered).toEqual(plaintext);
     });
 
@@ -123,20 +123,20 @@ describe("encryptRecord / decryptRecord round-trip", () => {
         const { key, nonce } = keyNonceFor("AES-128-GCM");
         const plaintext = new TextEncoder().encode("integrity matters");
         const aad = serializeRecordHeader(23, plaintext.length + 16);
-        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-128-GCM");
+        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-128-GCM", crypto);
         // Corrupt the last byte (part of the authentication tag).
         ciphertext[ciphertext.length - 1] ^= 0xff;
-        expect(() => decryptRecord(ciphertext, key, nonce, aad, "AES-128-GCM")).toThrow(TlsDecryptError);
+        expect(() => decryptRecord(ciphertext, key, nonce, aad, "AES-128-GCM", crypto)).toThrow(TlsDecryptError);
     });
 
     it("decryption fails with TlsDecryptError when the AAD does not match", () => {
         const { key, nonce } = keyNonceFor("AES-128-GCM");
         const plaintext = new TextEncoder().encode("aad binds the header");
         const aad = serializeRecordHeader(23, plaintext.length + 16);
-        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-128-GCM");
+        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-128-GCM", crypto);
         // A different header -> different AAD -> auth failure.
         const otherAad = serializeRecordHeader(22, plaintext.length + 16);
-        expect(() => decryptRecord(ciphertext, key, nonce, otherAad, "AES-128-GCM")).toThrow(TlsDecryptError);
+        expect(() => decryptRecord(ciphertext, key, nonce, otherAad, "AES-128-GCM", crypto)).toThrow(TlsDecryptError);
     });
 });
 
@@ -156,7 +156,7 @@ describe("decryptRecord defensive cause handling", () => {
         const nonce = crypto.randomBytes(12);
         const aad = serializeRecordHeader(22, 16);
         try {
-            expect(() => decryptRecord(new Uint8Array(16), key, nonce, aad, "AES-128-GCM")).toThrow(
+            expect(() => decryptRecord(new Uint8Array(16), key, nonce, aad, "AES-128-GCM", crypto)).toThrow(
                 TlsDecryptError,
             );
         } finally {
@@ -174,16 +174,16 @@ describe("exhaustiveness guards (default -> assertNever)", () => {
         // runtime the switch only sees a string — this exercises the
         // exhaustiveness default.
         const bad = "AES-128-OCB" as unknown as AeadAlgorithm;
-        expect(() => encryptRecord(plaintext, key, nonce, aad, bad)).toThrow(/Unexpected value/);
+        expect(() => encryptRecord(plaintext, key, nonce, aad, bad, crypto)).toThrow(/Unexpected value/);
     });
 
     it("decryptRecord hits the default branch for an unrecognized algorithm", () => {
         const { key, nonce } = keyNonceFor("AES-128-GCM");
         const plaintext = new TextEncoder().encode("x");
         const aad = serializeRecordHeader(23, plaintext.length + 16);
-        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-128-GCM");
+        const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-128-GCM", crypto);
         const bad = "AES-128-OCB" as unknown as AeadAlgorithm;
         // The default throws inside the try; the catch wraps it as TlsDecryptError.
-        expect(() => decryptRecord(ciphertext, key, nonce, aad, bad)).toThrow(TlsDecryptError);
+        expect(() => decryptRecord(ciphertext, key, nonce, aad, bad, crypto)).toThrow(TlsDecryptError);
     });
 });

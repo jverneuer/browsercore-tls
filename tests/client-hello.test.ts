@@ -15,7 +15,6 @@ import { describe, it, expect } from "vitest";
 import { crypto } from "@browsercore/crypto";
 import {
     buildClientHello,
-    defaultRandomByte,
     generateGreaseValue,
 } from "../src/handshake/client-hello.js";
 import { TlsHandshakeError } from "../src/errors.js";
@@ -48,7 +47,7 @@ describe("buildClientHello SNI length guard", () => {
         const kps = await keyPairs(["x25519"]);
         const huge = "a".repeat(65536);
         try {
-            buildClientHello({ ...BASE_CONFIG, serverName: huge }, kps);
+            buildClientHello({ ...BASE_CONFIG, serverName: huge }, kps, () => Math.random(), crypto);
             expect.unreachable("expected a throw");
         } catch (e) {
             const err = e as TlsHandshakeError;
@@ -62,7 +61,7 @@ describe("buildClientHello SNI length guard", () => {
         const kps = await keyPairs(["x25519"]);
         const max = "a".repeat(65535);
         // Should not throw — the bound is inclusive.
-        const hello = buildClientHello({ ...BASE_CONFIG, serverName: max }, kps);
+        const hello = buildClientHello({ ...BASE_CONFIG, serverName: max }, kps, () => Math.random(), crypto);
         expect(hello[0]).toBe(0x01); // HandshakeType.CLIENT_HELLO
     });
 });
@@ -75,7 +74,7 @@ describe("buildClientHello per-index undefined guards", () => {
         const sparse = ["TLS_AES_128_GCM_SHA256", undefined as unknown as "TLS_AES_128_GCM_SHA256"];
         const cfg = { ...BASE_CONFIG, cipherSuites: sparse };
         try {
-            buildClientHello(cfg, kps);
+            buildClientHello(cfg, kps, () => Math.random(), crypto);
             expect.unreachable("expected a throw");
         } catch (e) {
             const err = e as TlsHandshakeError;
@@ -89,7 +88,7 @@ describe("buildClientHello per-index undefined guards", () => {
         const sparse = [TLS_1_3, undefined as unknown as typeof TLS_1_3];
         const cfg = { ...BASE_CONFIG, supportedVersions: sparse };
         try {
-            buildClientHello(cfg, kps);
+            buildClientHello(cfg, kps, () => Math.random(), crypto);
             expect.unreachable("expected a throw");
         } catch (e) {
             const err = e as TlsHandshakeError;
@@ -102,7 +101,7 @@ describe("buildClientHello per-index undefined guards", () => {
         const sparse = ["ecdsa_secp256r1_sha256", undefined as unknown as "ecdsa_secp256r1_sha256"];
         const cfg = { ...BASE_CONFIG, signatureAlgorithms: sparse };
         try {
-            buildClientHello(cfg, kps);
+            buildClientHello(cfg, kps, () => Math.random(), crypto);
             expect.unreachable("expected a throw");
         } catch (e) {
             const err = e as TlsHandshakeError;
@@ -115,7 +114,7 @@ describe("buildClientHello per-index undefined guards", () => {
         const sparse = ["x25519", undefined as unknown as "x25519"];
         const cfg = { ...BASE_CONFIG, keyShareGroups: sparse };
         try {
-            buildClientHello(cfg, kps);
+            buildClientHello(cfg, kps, () => Math.random(), crypto);
             expect.unreachable("expected a throw");
         } catch (e) {
             const err = e as TlsHandshakeError;
@@ -132,30 +131,8 @@ describe("buildClientHello per-index undefined guards", () => {
             extensionOrder: [27],
         };
         // Should not throw — the fixed list has no holes; this exercises the loop body.
-        const hello = buildClientHello(cfg, kps);
+        const hello = buildClientHello(cfg, kps, () => Math.random(), crypto);
         expect(hello[0]).toBe(0x01);
-    });
-});
-
-describe("defaultRandomByte defensive guard (noUncheckedIndexedAccess)", () => {
-    it("throws TlsHandshakeError when randomBytes(1) returns an empty array", () => {
-        // The guard exists solely to satisfy noUncheckedIndexedAccess without a
-        // non-null assertion. We can only reach it by invoking defaultRandomByte
-        // with a crypto provider whose randomBytes(1) returns an empty array —
-        // simulating the unreachable edge the type system can't rule out.
-        const emptyProvider = {
-            randomBytes: (_n: number): Uint8Array => new Uint8Array(0),
-        };
-        // defaultRandomByte reads `crypto.randomBytes(1)` directly (module-level
-        // singleton), not an injected provider, so we test the exported function
-        // and assert it returns a valid [0,1) value under the real provider.
-        const v = defaultRandomByte();
-        expect(typeof v).toBe("number");
-        expect(v).toBeGreaterThanOrEqual(0);
-        expect(v).toBeLessThan(1);
-        // The empty provider case is unreachable with the real crypto singleton;
-        // we document the guard's existence here rather than force a throw.
-        expect(emptyProvider.randomBytes(1).length).toBe(0);
     });
 });
 
@@ -181,7 +158,7 @@ describe("encodeExtensionBody default branch", () => {
             ...BASE_CONFIG,
             extensionOrder: [0x1a1a], // GREASE value, not a known ExtensionType
         };
-        const hello = buildClientHello(cfg, kps);
+        const hello = buildClientHello(cfg, kps, () => Math.random(), crypto);
         expect(hello[0]).toBe(0x01);
     });
 
@@ -194,7 +171,7 @@ describe("encodeExtensionBody default branch", () => {
             extensionOrder: [0x9999],
         };
         try {
-            buildClientHello(cfg, kps);
+            buildClientHello(cfg, kps, () => Math.random(), crypto);
             expect.unreachable("expected a throw");
         } catch (e) {
             const err = e as TlsHandshakeError;

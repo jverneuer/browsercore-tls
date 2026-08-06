@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { crypto } from "@browsercore/crypto";
 import {
     ContentType,
     parseRecordHeader,
@@ -135,7 +136,7 @@ describe("public API surface", () => {
     });
 
     it("TlsConnectionImpl exposes a branded id and starts connecting", () => {
-        const conn = new TlsConnectionImpl();
+        const conn = new TlsConnectionImpl(undefined, crypto);
         expect(conn.id).toMatch(/^tls_/);
         expect(conn.state.state).toBe("connecting");
         expect(conn.protocolVersion.name).toBe("TLS 1.3");
@@ -145,7 +146,7 @@ describe("public API surface", () => {
 
 describe("generateKeyShares", () => {
     it("returns a 32-byte X25519 public key for the x25519 group", async () => {
-        const shares = await generateKeyShares(["x25519"]);
+        const shares = await generateKeyShares(["x25519"], crypto);
         expect(shares).toHaveLength(1);
         const kp = shares[0]!;
         expect(kp.algorithm).toBe("x25519");
@@ -155,7 +156,7 @@ describe("generateKeyShares", () => {
     });
 
     it("returns a 65-byte uncompressed secp256r1 public key for the secp256r1 group", async () => {
-        const shares = await generateKeyShares(["secp256r1"]);
+        const shares = await generateKeyShares(["secp256r1"], crypto);
         expect(shares).toHaveLength(1);
         const kp = shares[0]!;
         expect(kp.algorithm).toBe("secp256r1");
@@ -166,7 +167,7 @@ describe("generateKeyShares", () => {
     });
 
     it("returns a 97-byte uncompressed secp384r1 public key for the secp384r1 group", async () => {
-        const shares = await generateKeyShares(["secp384r1"]);
+        const shares = await generateKeyShares(["secp384r1"], crypto);
         expect(shares).toHaveLength(1);
         const kp = shares[0]!;
         expect(kp.algorithm).toBe("secp384r1");
@@ -177,7 +178,7 @@ describe("generateKeyShares", () => {
     });
 
     it("generates shares for multiple groups in one call", async () => {
-        const shares = await generateKeyShares(["x25519", "secp256r1", "secp384r1"]);
+        const shares = await generateKeyShares(["x25519", "secp256r1", "secp384r1"], crypto);
         expect(shares).toHaveLength(3);
         expect(shares.map((s) => s.algorithm)).toEqual(["x25519", "secp256r1", "secp384r1"]);
     });
@@ -186,9 +187,9 @@ describe("generateKeyShares", () => {
         // The crypto backend only exposes X25519 and the two NIST ECDH curves —
         // other (EC)DHE groups fail fast with a typed handshake error rather than
         // a bogus key.
-        await expect(generateKeyShares(["x448"])).rejects.toThrow(TlsHandshakeError);
+        await expect(generateKeyShares(["x448"], crypto)).rejects.toThrow(TlsHandshakeError);
         try {
-            await generateKeyShares(["x448"]);
+            await generateKeyShares(["x448"], crypto);
         } catch (e) {
             const err = e as TlsHandshakeError;
             expect(err.phase).toBe("client_hello");
@@ -216,8 +217,8 @@ describe("buildClientHello", () => {
         // content type is 22 (HANDSHAKE) and the handshake message type is 1
         // (CLIENT_HELLO). buildClientHello emits the handshake message itself,
         // so we prepend a record header (as _writeRecord does) before asserting.
-        const keyPairs = await generateKeyShares(["x25519"]);
-        const hello = buildClientHello(config, keyPairs);
+        const keyPairs = await generateKeyShares(["x25519"], crypto);
+        const hello = buildClientHello(config, keyPairs, () => Math.random(), crypto);
         expect(hello[0]).toBe(HandshakeType.CLIENT_HELLO);
 
         const header = new Uint8Array([ContentType.HANDSHAKE, 0x03, 0x01, 0x00, hello.length & 0xff]);
@@ -334,6 +335,8 @@ describe("mock handshake derives application traffic keys", () => {
                 grease: true,
             },
             [dummyKeyPair()],
+            () => Math.random(),
+            crypto,
         );
         // A ServerHello message (4-byte header + body) so the transcript mirrors reality.
         const shBody = new Uint8Array([
@@ -366,7 +369,7 @@ describe("mock handshake derives application traffic keys", () => {
         // bytes drive the schedule. Use a deterministic placeholder.
         const sharedSecret = new Uint8Array(32).fill(0x42);
 
-        const { masterSecret } = deriveHandshakeTrafficSecrets(sharedSecret, helloHash, cipherSuite);
+        const { masterSecret } = deriveHandshakeTrafficSecrets(sharedSecret, helloHash, cipherSuite, crypto);
 
         // Advance the state machine through the server's encrypted flight to the
         // terminal "finished_received" phase — the point at which the client sends
@@ -387,7 +390,7 @@ describe("mock handshake derives application traffic keys", () => {
         expect(phase.phase).toBe("finished_received");
 
         // Application traffic secrets: client + server, each keyed and ived.
-        const appSecrets = deriveApplicationSecrets(masterSecret, helloHash, cipherSuite);
+        const appSecrets = deriveApplicationSecrets(masterSecret, helloHash, cipherSuite, crypto);
         expect(appSecrets.client.key.length).toBe(16); // AES-128
         expect(appSecrets.client.iv.length).toBe(12);
         expect(appSecrets.server.key.length).toBe(16);

@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { crypto } from "@browsercore/crypto";
 import {
     generateKeyPairSync,
     createSign,
@@ -318,7 +319,7 @@ describe("verifyChain", () => {
             subject: leaf.issuer,
         };
         // Should not throw.
-        await verifyChain(chain, [anchor], "example.com", Math.floor(Date.UTC(2025, 0, 1) / 1000));
+        await verifyChain(chain, [anchor], "example.com", Math.floor(Date.UTC(2025, 0, 1) / 1000), crypto);
     });
 
     it("rejects a hostname mismatch", async () => {
@@ -330,7 +331,7 @@ describe("verifyChain", () => {
             subject: leaf.issuer,
         };
         await expect(
-            verifyChain(chain, [anchor], "wrong.com", Math.floor(Date.UTC(2025, 0, 1) / 1000)),
+            verifyChain(chain, [anchor], "wrong.com", Math.floor(Date.UTC(2025, 0, 1) / 1000), crypto),
         ).rejects.toThrow(TlsHandshakeError);
     });
 
@@ -345,7 +346,7 @@ describe("verifyChain", () => {
         // 2035 is past the 2034 notAfter we encoded. The detail lives in the
         // `.cause`; the outer message is the generic phase string.
         await expect(
-            verifyChain(chain, [anchor], "example.com", Math.floor(Date.UTC(2035, 0, 1) / 1000)),
+            verifyChain(chain, [anchor], "example.com", Math.floor(Date.UTC(2035, 0, 1) / 1000), crypto),
         ).rejects.toMatchObject({ cause: { message: expect.stringMatching(/not valid/) } });
     });
 
@@ -358,7 +359,7 @@ describe("verifyChain", () => {
             subject: "nobody",
         };
         await expect(
-            verifyChain(chain, [wrongAnchor], "example.com", Math.floor(Date.UTC(2025, 0, 1) / 1000)),
+            verifyChain(chain, [wrongAnchor], "example.com", Math.floor(Date.UTC(2025, 0, 1) / 1000), crypto),
         ).rejects.toMatchObject({ cause: { message: expect.stringMatching(/trust anchor/) } });
     });
 
@@ -375,7 +376,7 @@ describe("verifyChain", () => {
             subject: wrongRoot.issuer,
         };
         await expect(
-            verifyChain(chain, [anchor], "example.com", Math.floor(Date.UTC(2025, 0, 1) / 1000)),
+            verifyChain(chain, [anchor], "example.com", Math.floor(Date.UTC(2025, 0, 1) / 1000), crypto),
         ).rejects.toMatchObject({ cause: { message: expect.stringMatching(/signature verification failed/) } });
     });
 });
