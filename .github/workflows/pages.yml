@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   deploy:
-    if: always() && github.event.workflow_run.conclusion != 'cancelled'
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
