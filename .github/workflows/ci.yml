@@ -77,20 +77,13 @@ jobs:
           echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
           echo "Version $CURRENT (previous: ${PREVIOUS:-<none>}) — changed: $CHANGED"
 
-      - name: Commit COVERAGE.md
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          # coverage/ is gitignored; force-add the generated report + badge
-          # so they are tracked in the repo root.
-          git add -f COVERAGE.md coverage/badge.json
-          if git diff --cached --quiet; then
-            echo "coverage report unchanged — nothing to commit"
-          else
-            git commit -m "ci: update coverage report [skip ci]"
-            git push origin HEAD:coverage --force-with-lease
-          fi
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: |
+            COVERAGE.md
+            coverage/badge.json
 
       - name: Publish to npm
         if: steps.version.outputs.changed == 'true'
