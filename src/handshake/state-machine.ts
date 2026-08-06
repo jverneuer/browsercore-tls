@@ -100,8 +100,15 @@ export function isKeyShareGroup(group: NamedGroup): boolean {
         case "secp256r1":
         case "secp384r1":
         case "x25519":
-        case "x448":
             return true;
+        case "secp521r1":
+        case "x448":
+        case "ffdhe2048":
+        case "ffdhe3072":
+            // secp521r1, x448 and the FFDHE groups are valid (EC)DHE groups,
+            // but the crypto backend does not implement their key exchange, so
+            // they are not usable here.
+            return false;
         case "X25519MLKEM768":
         case "X25519Kyber768":
             // Post-quantum hybrid groups: the crypto backend does not (yet)

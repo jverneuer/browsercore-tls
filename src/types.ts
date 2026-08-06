@@ -60,17 +60,29 @@ export type CipherSuite =
     | "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA"
     | "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA"
     | "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA"
+    | "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256"
+    | "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384"
+    | "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256"
+    | "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384"
     | "TLS_RSA_WITH_AES_128_GCM_SHA256"
     | "TLS_RSA_WITH_AES_256_GCM_SHA384"
     | "TLS_RSA_WITH_AES_128_CBC_SHA"
-    | "TLS_RSA_WITH_AES_256_CBC_SHA";
+    | "TLS_RSA_WITH_AES_256_CBC_SHA"
+    | "TLS_RSA_WITH_AES_128_CBC_SHA256"
+    | "TLS_RSA_WITH_AES_256_CBC_SHA256"
+    | "TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA"
+    | "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA"
+    | "TLS_RSA_WITH_3DES_EDE_CBC_SHA";
 
 /** Named groups for key share (ECDHE). */
 export type NamedGroup =
     | "secp256r1"
     | "secp384r1"
+    | "secp521r1"
     | "x25519"
     | "x448"
+    | "ffdhe2048"
+    | "ffdhe3072"
     | "X25519MLKEM768"
     | "X25519Kyber768";
 
@@ -84,6 +96,8 @@ export type NamedGroup =
 export type SignatureScheme =
     | "ecdsa_secp256r1_sha256"
     | "ecdsa_secp384r1_sha384"
+    | "ecdsa_secp521r1_sha512"
+    | "ecdsa_sha1"
     | "ed25519"
     | "rsa_pss_rsae_sha256"
     | "rsa_pss_rsae_sha384"

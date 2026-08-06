@@ -63,13 +63,17 @@ export function computeSharedSecret(serverHello: ServerHello, keyPairs: readonly
         case "secp256r1":
         case "secp384r1":
             return provider.ecdhSharedSecret(group, myPair.privateKey, serverPublicKey);
+        case "secp521r1":
         case "x448":
+        case "ffdhe2048":
+        case "ffdhe3072":
         case "X25519MLKEM768":
         case "X25519Kyber768":
             // @browsercore/crypto only exposes X25519 and the two NIST ECDH
-            // curves today. Other (EC)DHE groups (including the post-quantum
-            // hybrids) would need a backend we do not have — fail fast and typed
-            // rather than producing a bogus secret.
+            // curves (secp256r1, secp384r1) today. Other (EC)DHE groups
+            // (secp521r1, x448, FFDHE, and the post-quantum hybrids) would need
+            // a backend we do not have — fail fast and typed rather than
+            // producing a bogus secret.
             throw new TlsHandshakeError("server_hello", {
                 cause: new Error(`key exchange for group ${group} is not supported by the crypto backend`),
             });

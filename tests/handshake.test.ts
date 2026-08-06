@@ -25,11 +25,22 @@ import { TLS_1_2, TLS_1_3 } from "../src/types.js";
 import type { CipherSuite, ClientHelloConfig, KeyPair, ProtocolVersion } from "../src/types.js";
 
 describe("isKeyShareGroup", () => {
-    it("returns true for every (EC)DHE group", () => {
+    it("returns true for every (EC)DHE group the crypto backend supports", () => {
         expect(isKeyShareGroup("secp256r1")).toBe(true);
         expect(isKeyShareGroup("secp384r1")).toBe(true);
         expect(isKeyShareGroup("x25519")).toBe(true);
-        expect(isKeyShareGroup("x448")).toBe(true);
+    });
+
+    it("returns false for (EC)DHE groups the crypto backend does not support", () => {
+        // x448, secp521r1, FFDHE groups, and the post-quantum hybrids are
+        // valid wire groups but the crypto backend does not implement their
+        // key exchange, so they are not usable for key share.
+        expect(isKeyShareGroup("x448")).toBe(false);
+        expect(isKeyShareGroup("secp521r1")).toBe(false);
+        expect(isKeyShareGroup("ffdhe2048")).toBe(false);
+        expect(isKeyShareGroup("ffdhe3072")).toBe(false);
+        expect(isKeyShareGroup("X25519MLKEM768")).toBe(false);
+        expect(isKeyShareGroup("X25519Kyber768")).toBe(false);
     });
 });
 
