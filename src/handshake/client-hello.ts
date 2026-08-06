@@ -18,9 +18,9 @@ import type {
     SignatureScheme,
 } from "../types.js";
 import { TlsHandshakeError } from "../errors.js";
-import { assertNever } from "../utils.js";
 import { ExtensionType, namedGroupToWire, signatureSchemeToWire } from "../extensions/extensions.js";
 import { HandshakeType } from "./handshake-types.js";
+import { CIPHER_SUITE_CODES } from "../iana/index.js";
 
 /** TLS 1.2 wire version used as legacy_version in TLS 1.3 records/handshakes. */
 const TLS_1_2_WIRE_VERSION = 0x0303;
@@ -78,14 +78,6 @@ export function generateGreaseValue(random: () => number = defaultRandomByte): n
 }
 
 /**
- * Canonical first GREASE code (0x0a0a). Used purely as the wire mapping target
- * for the `TLS_GREASE_RESERVED_0` placeholder in `cipherSuiteToWire`; the
- * actual per-connection sentinel is randomized at the emission site via
- * `generateGreaseValue`.
- */
-const GREASE_CIPHER_WIRE = 0x0a0a;
-
-/**
  * Length (bytes) of the key-exchange blob we emit for a GREASE key-share entry.
  * Matches X25519 so the GREASE entry is indistinguishable in size from a real one.
  */
@@ -97,52 +89,17 @@ const GREASE_KEY_LENGTH = 32;
  * Covers every suite the shipped browser profiles offer: the four TLS 1.3 AEAD
  * suites (the only ones a TLS 1.3 handshake can *negotiate*) plus the TLS 1.2
  * suites and the GREASE placeholder that real Chrome places in the *offered*
- * ClientHello list for middlebox compatibility. Values come from the IANA TLS
- * Cipher Suite Registry and match `@browsercore/profiles`' canonical table.
+ * ClientHello list for middlebox compatibility. Values come from the canonical
+ * IANA table in `../iana/cipher-suites.ts`.
  */
 export function cipherSuiteToWire(suite: CipherSuite): number {
-    switch (suite) {
-        case "TLS_GREASE_RESERVED_0":
-            return GREASE_CIPHER_WIRE;
-        case "TLS_AES_128_GCM_SHA256":
-            return 0x1301;
-        case "TLS_AES_256_GCM_SHA384":
-            return 0x1302;
-        case "TLS_CHACHA20_POLY1305_SHA256":
-            return 0x1303;
-        case "TLS_AES_128_CCM_SHA256":
-            return 0x1304;
-        case "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256":
-            return 0xc02b;
-        case "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256":
-            return 0xc02f;
-        case "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384":
-            return 0xc02c;
-        case "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384":
-            return 0xc030;
-        case "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256":
-            return 0xcca9;
-        case "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256":
-            return 0xcca8;
-        case "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA":
-            return 0xc013;
-        case "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA":
-            return 0xc014;
-        case "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA":
-            return 0xc009;
-        case "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA":
-            return 0xc00a;
-        case "TLS_RSA_WITH_AES_128_GCM_SHA256":
-            return 0x009c;
-        case "TLS_RSA_WITH_AES_256_GCM_SHA384":
-            return 0x009d;
-        case "TLS_RSA_WITH_AES_128_CBC_SHA":
-            return 0x002f;
-        case "TLS_RSA_WITH_AES_256_CBC_SHA":
-            return 0x0035;
-        default:
-            return assertNever(suite);
+    const code = CIPHER_SUITE_CODES[suite];
+    if (code === undefined) {
+        throw new TlsHandshakeError("client_hello", {
+            cause: new Error(`unknown cipher suite: ${suite}`),
+        });
     }
+    return code;
 }
 
 /**

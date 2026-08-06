@@ -247,15 +247,15 @@ describe("wireToExtensionType (parseExtensions unknown type)", () => {
     });
 });
 
-describe("exhaustiveness guards (default -> assertNever)", () => {
-    it("signatureSchemeToWire hits the default branch for an unrecognised scheme", () => {
+describe("unknown value guards (table lookup miss)", () => {
+    it("signatureSchemeToWire throws on an unrecognised scheme", () => {
         const bogus = "md5_with_rsa" as unknown as SignatureScheme;
-        expect(() => signatureSchemeToWire(bogus)).toThrow(/Unexpected value/);
+        expect(() => signatureSchemeToWire(bogus)).toThrow(/unknown signature scheme/);
     });
 
-    it("namedGroupToWire hits the default branch for an unrecognised group", () => {
+    it("namedGroupToWire throws on an unrecognised group", () => {
         const bogus = "frobnitz" as unknown as NamedGroup;
-        expect(() => namedGroupToWire(bogus)).toThrow(/Unexpected value/);
+        expect(() => namedGroupToWire(bogus)).toThrow(/unknown named group/);
     });
 });
 
