@@ -231,6 +231,12 @@ function encodeExtensionBody(
                 : new Uint8Array(0);
         case ExtensionType.APPLICATION_SETTINGS:
             return encodeApplicationSettings(config.alpnProtocols);
+        case ExtensionType.APPLICATION_SETTINGS_OLD:
+            return encodeApplicationSettings(config.alpnProtocols);
+        case ExtensionType.ENCRYPTED_CLIENT_HELLO:
+            // No HPKE keys for real ECH; emit an empty body as a placeholder.
+            // The fetch layer filters this out of extensionOrder before connecting.
+            return new Uint8Array(0);
         case ExtensionType.SIGNED_CERTIFICATE_TIMESTAMP:
             return new Uint8Array(0);
         case ExtensionType.EXTENDED_MASTER_SECRET:
@@ -247,6 +253,9 @@ function encodeExtensionBody(
             return encodePskKeyExchangeModes();
         case ExtensionType.KEY_SHARE:
             return encodeKeyShareClient(config, keyPairs, greaseValue, provider);
+        case ExtensionType.PADDING:
+            // RFC 7685: the extension's presence is the fingerprint signal; body is empty.
+            return new Uint8Array(0);
         case ExtensionType.RENEGOTIATION_INFO:
             return encodeRenegotiationInfo();
         default:

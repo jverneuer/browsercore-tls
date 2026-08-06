@@ -17,6 +17,8 @@ export const ExtensionType = {
     USE_SRTP: 14,
     APPLICATION_LAYER_PROTOCOL_NEGOTIATION: 16,
     APPLICATION_SETTINGS: 17613,
+    /** Pre-Chrome 132 application_settings code (17513). Chrome 120/128 profiles still carry it. */
+    APPLICATION_SETTINGS_OLD: 17513,
     ENCRYPTED_CLIENT_HELLO: 65037,
     SIGNED_CERTIFICATE_TIMESTAMP: 18,
     EXTENDED_MASTER_SECRET: 23,
@@ -28,6 +30,8 @@ export const ExtensionType = {
     COOKIE: 44,
     PSK_KEY_EXCHANGE_MODES: 45,
     KEY_SHARE: 51,
+    /** RFC 7685 padding extension. Safari and Edge profiles carry it as a fingerprint signal. */
+    PADDING: 21,
     RENEGOTIATION_INFO: 65281,
 } as const;
 
@@ -154,6 +158,8 @@ export function wireToNamedGroup(wire: number): NamedGroup {
             return "secp256r1";
         case 0x0018:
             return "secp384r1";
+        case 0x0019:
+            return "secp521r1";
         case 0x001d:
             return "x25519";
         case 0x001e:
@@ -191,6 +197,7 @@ export function wireToExtensionType(wire: number): ExtensionType {
         case ExtensionType.USE_SRTP:
         case ExtensionType.APPLICATION_LAYER_PROTOCOL_NEGOTIATION:
         case ExtensionType.APPLICATION_SETTINGS:
+        case ExtensionType.APPLICATION_SETTINGS_OLD:
         case ExtensionType.ENCRYPTED_CLIENT_HELLO:
         case ExtensionType.SIGNED_CERTIFICATE_TIMESTAMP:
         case ExtensionType.EXTENDED_MASTER_SECRET:
@@ -202,6 +209,7 @@ export function wireToExtensionType(wire: number): ExtensionType {
         case ExtensionType.COOKIE:
         case ExtensionType.PSK_KEY_EXCHANGE_MODES:
         case ExtensionType.KEY_SHARE:
+        case ExtensionType.PADDING:
         case ExtensionType.RENEGOTIATION_INFO:
             return wire;
         default:
