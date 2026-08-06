@@ -186,7 +186,7 @@ export async function runHandshake(
 
     // 8. Send the client Finished under the client handshake traffic key.
     const finishedMessage = buildClientFinishedMessage(ctx.hash, ctx.clientHsTrafficSecret, ctx.transcript, ctx.crypto)
-    writeEncryptedRecord(
+    await writeEncryptedRecord(
         ctx.transport,
         ctx.aead,
         ctx.clientHsTraffic,

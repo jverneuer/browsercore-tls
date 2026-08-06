@@ -156,7 +156,7 @@ export async function writeRecord(transport: Transport, type: ContentType, fragm
  * outer type is application_data. The inner content type byte is appended to
  * the plaintext before encryption.
  */
-export function writeEncryptedRecord(
+export async function writeEncryptedRecord(
     transport: Transport,
     aead: Parameters<typeof encryptRecord>[4],
     traffic: TrafficSecrets,
@@ -164,10 +164,10 @@ export function writeEncryptedRecord(
     content: Uint8Array,
     seq: number,
     provider: CryptoProvider,
-): void {
+): Promise<void> {
     const plaintext = concat(content, new Uint8Array([innerType]));
     const header = serializeRecordHeader(ContentType.APPLICATION_DATA, plaintext.length + AEAD_TAG_LENGTH);
     const nonce = xorNonce(traffic.iv, seq);
-    const ciphertext = encryptRecord(plaintext, traffic.key, nonce, header, aead, provider)
-    void transport.write(concat(header, ciphertext));
+    const ciphertext = encryptRecord(plaintext, traffic.key, nonce, header, aead, provider);
+    await transport.write(concat(header, ciphertext));
 }
