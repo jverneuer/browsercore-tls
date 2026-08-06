@@ -94,3 +94,12 @@ export { assertNever } from "./utils.js";
 // Re-exported for downstream consumers (e.g. @browsercore/quic) that run the
 // TLS handshake over a non-TLS transport (QUIC stream 0).
 export { runHandshake, type HandshakeContext } from "./connection/index.js";
+
+// IANA TLS parameter registries — canonical wire code tables.
+export {
+    CIPHER_GREASE_PLACEHOLDER,
+    CIPHER_SUITE_CODES,
+    NAMED_GROUP_CODES,
+    SIGNATURE_SCHEME_CODES,
+    VERSION_CODES,
+} from "./iana/index.js";

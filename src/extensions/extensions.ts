@@ -7,9 +7,7 @@
 
 import type { NamedGroup, ProtocolVersion, SignatureScheme } from "../types.js";
 import { TlsHandshakeError } from "../errors.js";
-import { assertNever } from "../utils.js";
-
-/** TLS extension types, per IANA / RFC 8446. */
+import { NAMED_GROUP_CODES, SIGNATURE_SCHEME_CODES } from "../iana/index.js";/** TLS extension types, per IANA / RFC 8446. */
 export const ExtensionType = {
     SERVER_NAME: 0,
     STATUS_REQUEST: 5,
@@ -126,55 +124,27 @@ export function findExtension(
 /**
  * IANA wire value for a signature scheme.
  *
- * Covers every scheme the shipped browser profiles offer. Values come from the
- * IANA TLS Signature Scheme Registry and match `@browsercore/profiles`' canonical
- * table.
+ * Values come from the canonical IANA table in `../iana/signature-schemes.ts`.
  */
 export function signatureSchemeToWire(scheme: SignatureScheme): number {
-    switch (scheme) {
-        case "ecdsa_secp256r1_sha256":
-            return 0x0403;
-        case "ecdsa_secp384r1_sha384":
-            return 0x0503;
-        case "ed25519":
-            return 0x0807;
-        case "rsa_pss_rsae_sha256":
-            return 0x0804;
-        case "rsa_pss_rsae_sha384":
-            return 0x0805;
-        case "rsa_pss_rsae_sha512":
-            return 0x0806;
-        case "rsa_pkcs1_sha256":
-            return 0x0401;
-        case "rsa_pkcs1_sha384":
-            return 0x0501;
-        case "rsa_pkcs1_sha512":
-            return 0x0601;
-        case "rsa_pkcs1_sha1":
-            return 0x0201;
-        default:
-            return assertNever(scheme);
+    const code = SIGNATURE_SCHEME_CODES[scheme];
+    if (code === undefined) {
+        throw new TlsHandshakeError("server_hello", {
+            cause: new Error(`unknown signature scheme: ${scheme}`),
+        });
     }
+    return code;
 }
 
-/** IANA wire value for a named group (subset). */
+/** IANA wire value for a named group. Values from `../iana/named-groups.ts`. */
 export function namedGroupToWire(group: NamedGroup): number {
-    switch (group) {
-        case "secp256r1":
-            return 0x0017;
-        case "secp384r1":
-            return 0x0018;
-        case "x25519":
-            return 0x001d;
-        case "x448":
-            return 0x001e;
-        case "X25519MLKEM768":
-            return 0x11ec;
-        case "X25519Kyber768":
-            return 0x6399;
-        default:
-            return assertNever(group);
+    const code = NAMED_GROUP_CODES[group];
+    if (code === undefined) {
+        throw new TlsHandshakeError("server_hello", {
+            cause: new Error(`unknown named group: ${group}`),
+        });
     }
+    return code;
 }
 
 /** Invert {@link namedGroupToWire}; throws {@link TlsHandshakeError} on unknown values. */
