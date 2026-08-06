@@ -30,7 +30,6 @@ export {
     type CloseReason,
     type Clock,
     type KeyPair,
-    type Logger,
     type NamedGroup,
     type ProtocolVersion,
     type SignatureScheme,
@@ -41,8 +40,6 @@ export {
     TLS_1_2,
     TLS_1_3,
     systemClock,
-    devLogger,
-    silentLogger,
 } from "./types.js";
 
 // Re-exported for downstream consumers (e.g. @browsercore/quic) that map TLS

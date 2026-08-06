@@ -25,7 +25,6 @@ import type { Transport } from "@browsercore/transport";
 import {
     systemClock,
     TLS_1_3,
-    silentLogger,
     type ApplicationData,
     type ApplicationTrafficSecrets,
     type CipherSuite,
@@ -33,7 +32,6 @@ import {
     type CloseReason,
     type Clock,
     type KeyPair,
-    type Logger,
     type ProtocolVersion,
     type TlsConnection,
     type TlsOptions,
@@ -151,8 +149,6 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
     private readonly trustAnchors: readonly Uint8Array[] = [];
     /** Time source (defaults to systemClock). Injected via TlsOptions.clock. */
     private readonly clock: Clock;
-    /** Logging sink (defaults to silentLogger). Injected via TlsOptions. */
-    private readonly logger: Logger;
     /** Cryptographic provider, injected via the constructor (never defaulted). */
     public readonly crypto!: CryptoProvider;
 
@@ -190,10 +186,6 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
         // supply one. Assigned here (before the options guard) so both the no-arg
         // and full-options paths share the same default.
         this.clock = options?.clock ?? systemClock;
-        // The logger defaults to silent so library consumers see no output unless
-        // they opt in. Assigned here so both the no-arg and full-options paths
-        // share the same default.
-        this.logger = options?.logger ?? silentLogger;
         this.crypto = provider;
         if (options !== undefined) {
             this.transport = options.transport;
@@ -315,7 +307,6 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
         }
         await this.transport.close();
         this.transition({ state: "closed", reason: { kind: "close_notify" } });
-        this.logger.debug("tls connection closed", { sessionId: this.id });
         notifyClose(this.closeListeners, { kind: "close_notify" });
     }
 
@@ -342,7 +333,6 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
      */
     private async performHandshake(): Promise<void> {
         this.state = { state: "handshaking" };
-        this.logger.debug("tls handshake start", { sessionId: this.id, serverName: this.serverName });
         const now = Math.floor(this.clock.now() / 1000);
         this.applicationSecrets = await runHandshake(
             this,
@@ -363,12 +353,6 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
             protocolVersion: this.protocolVersion,
             cipherSuite: this.cipherSuite,
             ...(this.alpnProtocol === undefined ? {} : { alpnProtocol: this.alpnProtocol }),
-        });
-        this.logger.debug("tls handshake complete", {
-            sessionId: this.id,
-            protocolVersion: this.protocolVersion.name,
-            cipherSuite: this.cipherSuite,
-            alpn: this.alpnProtocol,
         });
     }
 
