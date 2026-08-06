@@ -227,11 +227,11 @@ export interface TlsOptions {
      */
     readonly logger?: Logger;
     /**
-     * Cryptographic provider. Defaults to the @browsercore/crypto singleton
-     * (NodeCryptoProvider). Inject a custom provider for testing or to swap
-     * the backend (WebCrypto, HSM).
+     * Cryptographic provider. REQUIRED — pure dependency injection, no fallback.
+     * Inject the @browsercore/crypto singleton (NodeCryptoProvider) for production,
+     * or a custom/fake provider for testing or to swap the backend (WebCrypto, HSM).
      */
-    readonly crypto?: CryptoProvider;
+    readonly crypto: CryptoProvider;
 }
 
 /**

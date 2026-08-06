@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { defaultX25519Backend } from "@browsercore/crypto";
+import { crypto, defaultX25519Backend } from "@browsercore/crypto";
 import { connectTls } from "../src/tls.js";
 import { TlsHandshakeError } from "../src/errors.js";
 import { ContentType } from "../src/record/record.js";
@@ -63,6 +63,7 @@ describe("connectTls full handshake (runHandshake)", () => {
         const transport = new HandshakeTransport(sim);
         const conn = await connectTls({
             transport,
+            crypto,
             serverName: "example.com",
             profile: PROFILE,
         });
@@ -87,6 +88,7 @@ describe("connectTls full handshake (runHandshake)", () => {
         const transport = new HandshakeTransport(sim);
         const conn = await connectTls({
             transport,
+            crypto,
             serverName: "example.com",
             profile: PROFILE,
         });
@@ -100,6 +102,7 @@ describe("connectTls full handshake (runHandshake)", () => {
         const transport = new HandshakeTransport(sim);
         const conn = await connectTls({
             transport,
+            crypto,
             serverName: "example.com",
             profile: { ...PROFILE, alpnProtocols: ["h2", "http/1.1"] },
         });
@@ -111,6 +114,7 @@ describe("connectTls full handshake (runHandshake)", () => {
         const transport = new HandshakeTransport(sim);
         const conn = await connectTls({
             transport,
+            crypto,
             serverName: "example.com",
             profile: PROFILE,
         });
@@ -123,6 +127,7 @@ describe("connectTls full handshake (runHandshake)", () => {
         await expect(
             connectTls({
                 transport,
+                crypto,
                 serverName: "example.com",
                 profile: { ...PROFILE, supportedVersions: [TLS_1_2] },
             }),
@@ -137,6 +142,7 @@ describe("connectTls full handshake (runHandshake)", () => {
         await expect(
             connectTls({
                 transport,
+                crypto,
                 serverName: "example.com",
                 profile: { ...PROFILE, keyShareGroups: ["secp256r1"] },
             }),
@@ -166,7 +172,7 @@ describe("connectTls full handshake (runHandshake)", () => {
             sim.responses[0] = new Uint8Array([ContentType.APPLICATION_DATA, ...sh.subarray(1)]);
         };
         await expect(
-            connectTls({ transport, serverName: "example.com", profile: PROFILE }),
+            connectTls({ transport, serverName: "example.com", profile: PROFILE, crypto }),
         ).rejects.toThrow(TlsHandshakeError);
     });
 
@@ -182,7 +188,7 @@ describe("connectTls full handshake (runHandshake)", () => {
             finished[finished.length - 1] ^= 0xff;
         };
         await expect(
-            connectTls({ transport, serverName: "example.com", profile: PROFILE }),
+            connectTls({ transport, serverName: "example.com", profile: PROFILE, crypto }),
         ).rejects.toThrow();
     });
 
@@ -191,6 +197,7 @@ describe("connectTls full handshake (runHandshake)", () => {
         const transport = new HandshakeTransport(sim);
         const conn = await connectTls({
             transport,
+            crypto,
             serverName: "example.com",
             profile: PROFILE,
         });

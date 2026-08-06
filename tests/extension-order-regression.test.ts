@@ -86,7 +86,7 @@ describe("Extensions appear in the exact order specified by the profile", () => 
             ExtensionType.SUPPORTED_VERSIONS, // 43
             ExtensionType.KEY_SHARE, // 51
         ];
-        const hello = buildClientHello(baseConfig(order, false), await x25519KeyPair());
+        const hello = buildClientHello(baseConfig(order, false), await x25519KeyPair(), () => Math.random(), crypto);
         expect(parseExtensionTypes(hello)).toEqual([...order]);
     });
 
@@ -96,7 +96,7 @@ describe("Extensions appear in the exact order specified by the profile", () => 
         const order = [
             0, 10, 11, 13, 16, 17613, 18, 23, 27, 35, 41, 43, 45, 5, 51, 65281,
         ];
-        const hello = buildClientHello(baseConfig(order, false), await x25519KeyPair());
+        const hello = buildClientHello(baseConfig(order, false), await x25519KeyPair(), () => Math.random(), crypto);
         expect(parseExtensionTypes(hello)).toEqual([...order]);
         expect(parseExtensionTypes(hello)).toHaveLength(16);
     });
@@ -108,7 +108,7 @@ describe("Extensions appear in the exact order specified by the profile", () => 
             ExtensionType.KEY_SHARE,
         ];
         // Pin the per-connection sentinel deterministically (random()=0.0 -> 0x0a0a).
-        const hello = buildClientHello(baseConfig(order, true), await x25519KeyPair(), () => 0.0);
+        const hello = buildClientHello(baseConfig(order, true), await x25519KeyPair(), () => 0.0, crypto);
         const types = parseExtensionTypes(hello);
         expect(types[0]).toBe(0x0a0a);
         expect(types.slice(1)).toEqual([...order]);
@@ -125,7 +125,7 @@ describe("Extensions appear in the exact order specified by the profile", () => 
             ExtensionType.KEY_SHARE, // 51
         ];
         const reversed = [...forward].reverse();
-        const hello = buildClientHello(baseConfig(reversed, false), await x25519KeyPair());
+        const hello = buildClientHello(baseConfig(reversed, false), await x25519KeyPair(), () => Math.random(), crypto);
         expect(parseExtensionTypes(hello)).toEqual(reversed);
         // And it must NOT match the forward order.
         expect(parseExtensionTypes(hello)).not.toEqual(forward);
@@ -139,10 +139,14 @@ describe("Changing extensionOrder changes the wire bytes", () => {
         const a = buildClientHello(
             baseConfig([ExtensionType.SERVER_NAME, ExtensionType.SUPPORTED_VERSIONS], false),
             await x25519KeyPair(),
+            () => Math.random(),
+            crypto,
         );
         const b = buildClientHello(
             baseConfig([ExtensionType.SUPPORTED_VERSIONS, ExtensionType.SERVER_NAME], false),
             await x25519KeyPair(),
+            () => Math.random(),
+            crypto,
         );
         // The wire bytes must differ. random(32) differs per call, so compare
         // only the extensions region deterministically by checking the parsed
@@ -156,6 +160,8 @@ describe("Changing extensionOrder changes the wire bytes", () => {
         const two = buildClientHello(
             baseConfig([ExtensionType.SERVER_NAME, ExtensionType.SUPPORTED_VERSIONS], false),
             await x25519KeyPair(),
+            () => Math.random(),
+            crypto,
         );
         const three = buildClientHello(
             baseConfig(
@@ -163,6 +169,8 @@ describe("Changing extensionOrder changes the wire bytes", () => {
                 false,
             ),
             await x25519KeyPair(),
+            () => Math.random(),
+            crypto,
         );
         expect(parseExtensionTypes(two)).toHaveLength(2);
         expect(parseExtensionTypes(three)).toHaveLength(3);
@@ -177,7 +185,7 @@ describe("Changing extensionOrder changes the wire bytes", () => {
         // The old code unconditionally hardcoded ALPN. A profile whose
         // extensionOrder omits type 16 must not get ALPN on the wire.
         const order = [ExtensionType.SERVER_NAME, ExtensionType.SUPPORTED_VERSIONS, ExtensionType.KEY_SHARE];
-        const hello = buildClientHello(baseConfig(order, false), await x25519KeyPair());
+        const hello = buildClientHello(baseConfig(order, false), await x25519KeyPair(), () => Math.random(), crypto);
         const types = parseExtensionTypes(hello);
         expect(types).not.toContain(ExtensionType.APPLICATION_LAYER_PROTOCOL_NEGOTIATION);
         expect(types).toEqual([...order]);

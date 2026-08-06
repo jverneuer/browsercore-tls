@@ -74,7 +74,7 @@ describe("computeSharedSecret", () => {
             { algorithm: "x25519", privateKey: client.secretKey, publicKey: client.publicKey },
         ];
         const sh = serverHelloWithKeyShare(namedGroupToWire("x25519"), server.publicKey);
-        const shared = computeSharedSecret(sh, keyPairs);
+        const shared = computeSharedSecret(sh, keyPairs, crypto);
         const expected = crypto.x25519SharedSecret(client.secretKey, server.publicKey);
         expect(shared).toEqual(expected);
     });
@@ -86,7 +86,7 @@ describe("computeSharedSecret", () => {
             { algorithm: "secp256r1", privateKey: client.secretKey, publicKey: client.publicKey },
         ];
         const sh = serverHelloWithKeyShare(namedGroupToWire("secp256r1"), server.publicKey);
-        const shared = computeSharedSecret(sh, keyPairs);
+        const shared = computeSharedSecret(sh, keyPairs, crypto);
         const expected = crypto.ecdhSharedSecret("secp256r1", client.secretKey, server.publicKey);
         expect(shared).toEqual(expected);
         expect(shared).toHaveLength(32);
@@ -99,7 +99,7 @@ describe("computeSharedSecret", () => {
             { algorithm: "secp384r1", privateKey: client.secretKey, publicKey: client.publicKey },
         ];
         const sh = serverHelloWithKeyShare(namedGroupToWire("secp384r1"), server.publicKey);
-        const shared = computeSharedSecret(sh, keyPairs);
+        const shared = computeSharedSecret(sh, keyPairs, crypto);
         const expected = crypto.ecdhSharedSecret("secp384r1", client.secretKey, server.publicKey);
         expect(shared).toEqual(expected);
         expect(shared).toHaveLength(48);
@@ -120,9 +120,9 @@ describe("computeSharedSecret", () => {
             selectedVersion: TLS_1_3,
             extensions: new Uint8Array([0x00, 0x00]),
         };
-        expect(() => computeSharedSecret(sh, keyPairs)).toThrow(TlsHandshakeError);
+        expect(() => computeSharedSecret(sh, keyPairs, crypto)).toThrow(TlsHandshakeError);
         try {
-            computeSharedSecret(sh, keyPairs);
+            computeSharedSecret(sh, keyPairs, crypto);
         } catch (e) {
             expect((e as TlsHandshakeError).cause?.message).toMatch(/missing required key_share/);
         }
@@ -134,7 +134,7 @@ describe("computeSharedSecret", () => {
             { algorithm: "x25519", privateKey: client.secretKey, publicKey: client.publicKey },
         ];
         const sh = serverHelloWithRawKeyShareData(new Uint8Array([0x00, 0x1d])); // group only, no len
-        expect(() => computeSharedSecret(sh, keyPairs)).toThrow(TlsHandshakeError);
+        expect(() => computeSharedSecret(sh, keyPairs, crypto)).toThrow(TlsHandshakeError);
     });
 
     it("throws when the key_exchange length does not match the remaining data", () => {
@@ -146,9 +146,9 @@ describe("computeSharedSecret", () => {
         const sh = serverHelloWithRawKeyShareData(
             new Uint8Array([0x00, 0x1d, 0x00, 0x20, ...new Array(10).fill(0)]),
         );
-        expect(() => computeSharedSecret(sh, keyPairs)).toThrow(TlsHandshakeError);
+        expect(() => computeSharedSecret(sh, keyPairs, crypto)).toThrow(TlsHandshakeError);
         try {
-            computeSharedSecret(sh, keyPairs);
+            computeSharedSecret(sh, keyPairs, crypto);
         } catch (e) {
             expect((e as TlsHandshakeError).cause?.message).toMatch(/length mismatch/);
         }
@@ -158,7 +158,7 @@ describe("computeSharedSecret", () => {
         const client = crypto.x25519GenerateKeyPair();
         // Client offers no key pairs at all.
         const sh = serverHelloWithKeyShare(namedGroupToWire("x25519"), client.publicKey);
-        expect(() => computeSharedSecret(sh, [])).toThrow(TlsHandshakeError);
+        expect(() => computeSharedSecret(sh, [], crypto)).toThrow(TlsHandshakeError);
         try {
             computeSharedSecret(sh, []);
         } catch (e) {
@@ -180,9 +180,9 @@ describe("computeSharedSecret", () => {
             { algorithm: "x448" as KeyPair["algorithm"], privateKey: new Uint8Array(56), publicKey: new Uint8Array(113) },
         ];
         const sh = serverHelloWithKeyShare(namedGroupToWire("x448"), new Uint8Array(113));
-        expect(() => computeSharedSecret(sh, keyPairs)).toThrow(TlsHandshakeError);
+        expect(() => computeSharedSecret(sh, keyPairs, crypto)).toThrow(TlsHandshakeError);
         try {
-            computeSharedSecret(sh, keyPairs);
+            computeSharedSecret(sh, keyPairs, crypto);
         } catch (e) {
             expect((e as TlsHandshakeError).cause?.message).toMatch(/not supported by the crypto backend/);
         }
@@ -194,7 +194,7 @@ describe("transcriptHash", () => {
         const msg1 = new Uint8Array([1, 2, 3]);
         const msg2 = new Uint8Array([4, 5]);
         const blob = new Uint8Array([1, 2, 3, 4, 5]);
-        const result = transcriptHash([msg1, msg2], "SHA-256");
+        const result = transcriptHash([msg1, msg2], "SHA-256", crypto);
         expect(result).toEqual(crypto.sha256(blob));
     });
 
@@ -202,12 +202,12 @@ describe("transcriptHash", () => {
         const msg1 = new Uint8Array([1, 2, 3]);
         const msg2 = new Uint8Array([4, 5]);
         const blob = new Uint8Array([1, 2, 3, 4, 5]);
-        const result = transcriptHash([msg1, msg2], "SHA-384");
+        const result = transcriptHash([msg1, msg2], "SHA-384", crypto);
         expect(result).toEqual(crypto.sha384(blob));
     });
 
     it("returns the hash of an empty blob for an empty transcript", () => {
-        expect(transcriptHash([], "SHA-256")).toEqual(crypto.sha256(new Uint8Array(0)));
+        expect(transcriptHash([], "SHA-256", crypto)).toEqual(crypto.sha256(new Uint8Array(0)));
     });
 });
 
@@ -220,7 +220,7 @@ describe("verifyServerFinished", () => {
         serverHsTrafficSecret: Uint8Array,
     ): Uint8Array {
         const hashLen = hashLengthFor(hash);
-        const finishedKey = hkdfExpandLabel(serverHsTrafficSecret, "finished", new Uint8Array(0), hashLen, hash);
+        const finishedKey = hkdfExpandLabel(serverHsTrafficSecret, "finished", new Uint8Array(0), hashLen, hash, crypto);
         return crypto.hmac(hash, finishedKey, transcript);
     }
 
@@ -228,14 +228,14 @@ describe("verifyServerFinished", () => {
         const secret = new Uint8Array(32).fill(0x5a);
         const transcript = new Uint8Array([10, 20, 30]);
         const body = makeFinished("SHA-256", transcript, secret);
-        expect(() => verifyServerFinished(body, transcript, "SHA-256", secret)).not.toThrow();
+        expect(() => verifyServerFinished(body, transcript, "SHA-256", secret, crypto)).not.toThrow();
     });
 
     it("accepts a Finished whose verify_data matches the transcript (SHA-384)", () => {
         const secret = new Uint8Array(48).fill(0x6b);
         const transcript = new Uint8Array([1, 2, 3, 4]);
         const body = makeFinished("SHA-384", transcript, secret);
-        expect(() => verifyServerFinished(body, transcript, "SHA-384", secret)).not.toThrow();
+        expect(() => verifyServerFinished(body, transcript, "SHA-384", secret, crypto)).not.toThrow();
     });
 
     it("throws when the Finished body length does not match the hash length", () => {
@@ -243,9 +243,9 @@ describe("verifyServerFinished", () => {
         const transcript = new Uint8Array([10, 20, 30]);
         // SHA-256 expects 32 bytes; pass 31.
         const wrong = new Uint8Array(31);
-        expect(() => verifyServerFinished(wrong, transcript, "SHA-256", secret)).toThrow(TlsHandshakeError);
+        expect(() => verifyServerFinished(wrong, transcript, "SHA-256", secret, crypto)).toThrow(TlsHandshakeError);
         try {
-            verifyServerFinished(wrong, transcript, "SHA-256", secret);
+            verifyServerFinished(wrong, transcript, "SHA-256", secret, crypto);
         } catch (e) {
             expect((e as TlsHandshakeError).cause?.message).toMatch(/Finished length 31/);
         }
@@ -257,9 +257,9 @@ describe("verifyServerFinished", () => {
         const body = makeFinished("SHA-256", transcript, secret);
         // Flip a byte so the HMAC no longer matches.
         body[0] ^= 0xff;
-        expect(() => verifyServerFinished(body, transcript, "SHA-256", secret)).toThrow(TlsHandshakeError);
+        expect(() => verifyServerFinished(body, transcript, "SHA-256", secret, crypto)).toThrow(TlsHandshakeError);
         try {
-            verifyServerFinished(body, transcript, "SHA-256", secret);
+            verifyServerFinished(body, transcript, "SHA-256", secret, crypto);
         } catch (e) {
             expect((e as TlsHandshakeError).cause?.message).toMatch(/verify_data mismatch/);
         }

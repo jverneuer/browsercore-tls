@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
+import { crypto } from "@browsercore/crypto";
 import { TlsConnectionImpl } from "../src/tls.js";
 import { ContentType, serializeRecordHeader, encryptRecord } from "../src/record/record.js";
 import { TlsError, TlsHandshakeError } from "../src/errors.js";
@@ -52,7 +53,8 @@ function openConnection(): TlsConnectionImpl {
         transport,
         serverName: "example.com",
         profile: BASE_PROFILE,
-    });
+        crypto,
+    }, crypto);
     const internals = conn as unknown as Internals;
     internals.applicationSecrets = SECRETS;
     conn.aead = "AES-128-GCM";
@@ -67,7 +69,7 @@ function openConnection(): TlsConnectionImpl {
 
 describe("TlsConnectionImpl constructor", () => {
     it("starts in the connecting state with default protocol/cipher", () => {
-        const conn = new TlsConnectionImpl();
+        const conn = new TlsConnectionImpl(undefined, crypto);
         expect(conn.state.state).toBe("connecting");
         expect(conn.protocolVersion).toEqual(TLS_1_3);
         expect(conn.cipherSuite).toBe("TLS_AES_128_GCM_SHA256");
@@ -82,7 +84,8 @@ describe("TlsConnectionImpl constructor", () => {
             serverName: "host.example",
             profile: BASE_PROFILE,
             trustAnchors: [anchor],
-        });
+            crypto,
+        }, crypto);
         expect((conn as unknown as { transport: FakeTransport }).transport).toBe(transport);
     });
 
@@ -93,7 +96,8 @@ describe("TlsConnectionImpl constructor", () => {
             serverName: "example.com",
             profile: BASE_PROFILE,
             alpnProtocols: ["h2"],
-        });
+            crypto,
+        }, crypto);
         // The override lands on the internal profile; alpnProtocol surfaces once
         // the handshake completes. Here we confirm the constructor did not crash
         // and the connection is usable.
@@ -107,7 +111,8 @@ describe("TlsConnectionImpl constructor", () => {
             serverName: "example.com",
             profile: { ...BASE_PROFILE, alpnProtocols: ["http/1.1"] },
             alpnProtocols: [],
-        });
+            crypto,
+        }, crypto);
         expect(conn.state.state).toBe("connecting");
     });
 
@@ -117,7 +122,8 @@ describe("TlsConnectionImpl constructor", () => {
             transport,
             serverName: "example.com",
             profile: BASE_PROFILE,
-        });
+            crypto,
+        }, crypto);
         // No crash; the connection is usable without anchors.
         expect(conn.state.state).toBe("connecting");
     });
@@ -129,7 +135,8 @@ describe("write", () => {
             transport: new FakeTransport(),
             serverName: "example.com",
             profile: BASE_PROFILE,
-        });
+            crypto,
+        }, crypto);
         // ensureOpen throws TlsHandshakeError; write() wraps it via ensureTlsError
         // so callers see a uniform TlsError.
         await expect(conn.write(new Uint8Array([1]))).rejects.toThrow(TlsError);
@@ -184,7 +191,8 @@ describe("read", () => {
             transport: new FakeTransport(),
             serverName: "example.com",
             profile: BASE_PROFILE,
-        });
+            crypto,
+        }, crypto);
         await expect(conn.read()).rejects.toThrow(TlsHandshakeError);
     });
 
@@ -202,7 +210,7 @@ describe("read", () => {
         const transport = (conn as unknown as { transport: FakeTransport }).transport;
         const payload = new TextEncoder().encode("from server");
         // Encrypt under the server application traffic key, seq 0.
-        writeEncryptedRecord(transport, "AES-128-GCM", SECRETS.server, ContentType.APPLICATION_DATA, payload, 0);
+        writeEncryptedRecord(transport, "AES-128-GCM", SECRETS.server, ContentType.APPLICATION_DATA, payload, 0, crypto);
         // Move the written record into the read queue so read() can consume it.
         transport.readQueue.push(transport.written.pop()!);
         const result = await conn.read();
@@ -213,7 +221,7 @@ describe("read", () => {
         const conn = openConnection();
         const transport = (conn as unknown as { transport: FakeTransport }).transport;
         // close_notify: level=warning(1), description=0.
-        writeEncryptedRecord(transport, "AES-128-GCM", SECRETS.server, ContentType.ALERT, new Uint8Array([0x01, 0x00]), 0);
+        writeEncryptedRecord(transport, "AES-128-GCM", SECRETS.server, ContentType.ALERT, new Uint8Array([0x01, 0x00]), 0, crypto);
         transport.readQueue.push(transport.written.pop()!);
         // read() processes the alert (graceful close -> state "closed"), then
         // loops to read the next record. Since no more data arrives it parks;
@@ -231,7 +239,7 @@ describe("read", () => {
         const errorListener = vi.fn();
         conn.on("error", errorListener);
         // Fatal alert: level=2, description=40 (handshake_failure).
-        writeEncryptedRecord(transport, "AES-128-GCM", SECRETS.server, ContentType.ALERT, new Uint8Array([0x02, 40]), 0);
+        writeEncryptedRecord(transport, "AES-128-GCM", SECRETS.server, ContentType.ALERT, new Uint8Array([0x02, 40]), 0, crypto);
         transport.readQueue.push(transport.written.pop()!);
         // The fatal alert emits an error but does NOT close; read() loops waiting
         // for the next record. Since none arrives it parks forever — race it.
@@ -247,11 +255,11 @@ describe("read", () => {
         const conn = openConnection();
         const transport = (conn as unknown as { transport: FakeTransport }).transport;
         // First record: a post-handshake HANDSHAKE message (e.g. NewSessionTicket).
-        writeEncryptedRecord(transport, "AES-128-GCM", SECRETS.server, ContentType.HANDSHAKE, new Uint8Array([4, 0, 0, 2, 0, 0]), 0);
+        writeEncryptedRecord(transport, "AES-128-GCM", SECRETS.server, ContentType.HANDSHAKE, new Uint8Array([4, 0, 0, 2, 0, 0]), 0, crypto);
         transport.readQueue.push(transport.written.pop()!);
         // Second record: real application data the read() should return.
         const payload = new TextEncoder().encode("after NST");
-        writeEncryptedRecord(transport, "AES-128-GCM", SECRETS.server, ContentType.APPLICATION_DATA, payload, 1);
+        writeEncryptedRecord(transport, "AES-128-GCM", SECRETS.server, ContentType.APPLICATION_DATA, payload, 1, crypto);
         transport.readQueue.push(transport.written.pop()!);
 
         const result = await conn.read();
@@ -261,7 +269,7 @@ describe("read", () => {
     it("rejects when an unexpected CHANGE_CIPHER_SPEC inner type arrives post-handshake", async () => {
         const conn = openConnection();
         const transport = (conn as unknown as { transport: FakeTransport }).transport;
-        writeEncryptedRecord(transport, "AES-128-GCM", SECRETS.server, ContentType.CHANGE_CIPHER_SPEC, new Uint8Array(0), 0);
+        writeEncryptedRecord(transport, "AES-128-GCM", SECRETS.server, ContentType.CHANGE_CIPHER_SPEC, new Uint8Array(0), 0, crypto);
         transport.readQueue.push(transport.written.pop()!);
         await expect(conn.read()).rejects.toThrow(TlsHandshakeError);
     });
@@ -299,7 +307,8 @@ describe("close", () => {
             transport: new FakeTransport(),
             serverName: "example.com",
             profile: BASE_PROFILE,
-        });
+            crypto,
+        }, crypto);
         const transport = (conn as unknown as { transport: FakeTransport }).transport;
         // state is "connecting" (not "open"), so no alert is sent.
         await conn.close();
@@ -320,13 +329,13 @@ describe("handshake", () => {
 
 describe("on", () => {
     it("registers a close listener and returns the connection for chaining", () => {
-        const conn = new TlsConnectionImpl();
+        const conn = new TlsConnectionImpl(undefined, crypto);
         const result = conn.on("close", () => {});
         expect(result).toBe(conn);
     });
 
     it("registers an error listener", () => {
-        const conn = new TlsConnectionImpl();
+        const conn = new TlsConnectionImpl(undefined, crypto);
         const result = conn.on("error", () => {});
         expect(result).toBe(conn);
     });

@@ -67,7 +67,7 @@ import {
  */
 export interface HandshakeContext {
     readonly transport: Transport;
-    /** Cryptographic provider (defaults to the @browsercore/crypto singleton). */
+    /** Cryptographic provider, injected by the owning connection (no default). */
     crypto: CryptoProvider;
     /** Mutable: buffered bytes not yet consumed by the record framer. */
     readBuffer: Uint8Array;
@@ -137,7 +137,7 @@ export async function runHandshake(
     const clientHello = buildClientHello(profile, keyPairs, () => {
         const byte = ctx.crypto.randomBytes(1)[0];
         return byte === undefined ? 0 : byte / 256;
-    });
+    }, ctx.crypto);
     ctx.transcript.push(clientHello);
     await writeRecord(ctx.transport, ContentType.HANDSHAKE, clientHello);
 
@@ -236,7 +236,7 @@ async function consumeServerFlight(
     ctx.serverHsSeq++;
     phase = advanceHandshake(phase, HandshakeType.CERTIFICATE);
     ctx.transcript.push(message.whole);
-    const chain = await validateCertificateChain(message.body, serverName, trustAnchors, now);
+    const chain = await validateCertificateChain(message.body, serverName, trustAnchors, now, ctx.crypto);
     ctx.peerCertificate = chain.leaf;
 
     // CertificateVerify.
@@ -250,14 +250,14 @@ async function consumeServerFlight(
     ctx.transcript.push(message.whole);
 
     // Finished — verify against the transcript *before* appending the Finished.
-    const finishedTranscript = transcriptHash(ctx.transcript, ctx.hash);
+    const finishedTranscript = transcriptHash(ctx.transcript, ctx.hash, ctx.crypto);
     message = await readEncryptedHandshakeMessage(
         ctx.readBuffer, ctx.transport, ctx.aead, ctx.serverHsTraffic, ctx.serverHsSeq,
     ctx.crypto,
     );
     ctx.readBuffer = message.readBuffer;
     ctx.serverHsSeq++;
-    verifyServerFinished(message.body, finishedTranscript, ctx.hash, ctx.serverHsTrafficSecret);
+    verifyServerFinished(message.body, finishedTranscript, ctx.hash, ctx.serverHsTrafficSecret, ctx.crypto);
     advanceHandshake(phase, HandshakeType.FINISHED);
     ctx.transcript.push(message.whole);
 }

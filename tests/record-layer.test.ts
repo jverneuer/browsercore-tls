@@ -193,6 +193,7 @@ describe("writeEncryptedRecord + readEncryptedRecord round-trip", () => {
             ContentType.APPLICATION_DATA,
             content,
             0,
+            crypto,
         );
         const record = transport.written[0]!;
         // Outer type is application_data; length = plaintext + innerType + tag.
@@ -203,6 +204,7 @@ describe("writeEncryptedRecord + readEncryptedRecord round-trip", () => {
             "AES-128-GCM",
             TRAFFIC,
             0,
+            crypto,
         );
         expect(result.innerType).toBe(ContentType.APPLICATION_DATA);
         expect(result.content).toEqual(content);
@@ -215,13 +217,14 @@ describe("writeEncryptedRecord + readEncryptedRecord round-trip", () => {
         };
         const transport = new FakeTransport();
         const content = new TextEncoder().encode("aes-256");
-        writeEncryptedRecord(transport, "AES-256-GCM", traffic, ContentType.HANDSHAKE, content, 7);
+        writeEncryptedRecord(transport, "AES-256-GCM", traffic, ContentType.HANDSHAKE, content, 7, crypto);
         const result = await readEncryptedRecord(
             transport.written[0]!,
             new FakeTransport(),
             "AES-256-GCM",
             traffic,
             7,
+            crypto,
         );
         expect(result.innerType).toBe(ContentType.HANDSHAKE);
         expect(result.content).toEqual(content);
@@ -241,6 +244,7 @@ describe("writeEncryptedRecord + readEncryptedRecord round-trip", () => {
             ContentType.APPLICATION_DATA,
             content,
             3,
+            crypto,
         );
         const result = await readEncryptedRecord(
             transport.written[0]!,
@@ -248,6 +252,7 @@ describe("writeEncryptedRecord + readEncryptedRecord round-trip", () => {
             "CHACHA20-POLY1305",
             traffic,
             3,
+            crypto,
         );
         expect(result.content).toEqual(content);
     });
@@ -267,7 +272,7 @@ describe("writeEncryptedRecord + readEncryptedRecord round-trip", () => {
         const ciphertext = crypto.aes128GcmEncrypt(TRAFFIC.key, nonce, padded, header);
         const record = concat(header, ciphertext);
 
-        const result = await readEncryptedRecord(record, new FakeTransport(), "AES-128-GCM", TRAFFIC, 0);
+        const result = await readEncryptedRecord(record, new FakeTransport(), "AES-128-GCM", TRAFFIC, 0, crypto);
         expect(result.innerType).toBe(innerType);
         expect(result.content).toEqual(content);
     });
@@ -277,7 +282,7 @@ describe("writeEncryptedRecord + readEncryptedRecord round-trip", () => {
         const transport = new FakeTransport();
         await writeRecord(transport, ContentType.HANDSHAKE, new Uint8Array([1, 2, 3]));
         await expect(
-            readEncryptedRecord(transport.written[0]!, new FakeTransport(), "AES-128-GCM", TRAFFIC, 0),
+            readEncryptedRecord(transport.written[0]!, new FakeTransport(), "AES-128-GCM", TRAFFIC, 0, crypto),
         ).rejects.toThrow(TlsHandshakeError);
     });
 
@@ -289,7 +294,7 @@ describe("writeEncryptedRecord + readEncryptedRecord round-trip", () => {
         const ciphertext = crypto.aes128GcmEncrypt(TRAFFIC.key, nonce, zeros, header);
         const record = concat(header, ciphertext);
         await expect(
-            readEncryptedRecord(record, new FakeTransport(), "AES-128-GCM", TRAFFIC, 0),
+            readEncryptedRecord(record, new FakeTransport(), "AES-128-GCM", TRAFFIC, 0, crypto),
         ).rejects.toThrow(TlsHandshakeError);
     });
 
@@ -302,7 +307,7 @@ describe("writeEncryptedRecord + readEncryptedRecord round-trip", () => {
         const ciphertext = crypto.aes128GcmEncrypt(TRAFFIC.key, nonce, bad, header);
         const record = concat(header, ciphertext);
         await expect(
-            readEncryptedRecord(record, new FakeTransport(), "AES-128-GCM", TRAFFIC, 0),
+            readEncryptedRecord(record, new FakeTransport(), "AES-128-GCM", TRAFFIC, 0, crypto),
         ).rejects.toThrow(TlsDecryptError);
     });
 
@@ -315,10 +320,11 @@ describe("writeEncryptedRecord + readEncryptedRecord round-trip", () => {
             ContentType.APPLICATION_DATA,
             new TextEncoder().encode("secret"),
             0,
+            crypto,
         );
         const wrongTraffic = { key: new Uint8Array(16).fill(0x00), iv: TRAFFIC.iv };
         await expect(
-            readEncryptedRecord(transport.written[0]!, new FakeTransport(), "AES-128-GCM", wrongTraffic, 0),
+            readEncryptedRecord(transport.written[0]!, new FakeTransport(), "AES-128-GCM", wrongTraffic, 0, crypto),
         ).rejects.toThrow(TlsDecryptError);
     });
 });

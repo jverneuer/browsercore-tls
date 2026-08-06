@@ -301,7 +301,7 @@ describe("buildClientHello edge cases", () => {
 
     it("emits an empty ALPN body when alpnProtocols is undefined", async () => {
         const kps = await keyPairs(["x25519"]);
-        const hello = buildClientHello(baseConfig, kps);
+        const hello = buildClientHello(baseConfig, kps, () => Math.random(), crypto);
         // ALPN (type 16) is in the profile's extension order, so the extension
         // IS emitted — but with an empty body when no protocols are configured.
         const extBlock = extractClientHelloExtensions(hello);
@@ -313,7 +313,7 @@ describe("buildClientHello edge cases", () => {
 
     it("emits an empty ALPN body when alpnProtocols is an empty array", async () => {
         const kps = await keyPairs(["x25519"]);
-        const hello = buildClientHello({ ...baseConfig, alpnProtocols: [] }, kps);
+        const hello = buildClientHello({ ...baseConfig, alpnProtocols: [] }, kps, () => Math.random(), crypto);
         const extBlock = extractClientHelloExtensions(hello);
         const parsed = parseExtensionsForTest(extBlock);
         const alpn = parsed.find((e) => e.type === ExtensionType.APPLICATION_LAYER_PROTOCOL_NEGOTIATION);
@@ -323,7 +323,7 @@ describe("buildClientHello edge cases", () => {
 
     it("emits a populated ALPN body when alpnProtocols is non-empty", async () => {
         const kps = await keyPairs(["x25519"]);
-        const hello = buildClientHello({ ...baseConfig, alpnProtocols: ["h2"] }, kps);
+        const hello = buildClientHello({ ...baseConfig, alpnProtocols: ["h2"] }, kps, () => Math.random(), crypto);
         const extBlock = extractClientHelloExtensions(hello);
         const parsed = parseExtensionsForTest(extBlock);
         const alpn = parsed.find((e) => e.type === ExtensionType.APPLICATION_LAYER_PROTOCOL_NEGOTIATION);
@@ -334,7 +334,7 @@ describe("buildClientHello edge cases", () => {
 
     it("builds a ClientHello with an empty serverName", async () => {
         const kps = await keyPairs(["x25519"]);
-        const hello = buildClientHello({ ...baseConfig, serverName: "" }, kps);
+        const hello = buildClientHello({ ...baseConfig, serverName: "" }, kps, () => Math.random(), crypto);
         expect(hello[0]).toBe(HandshakeType.CLIENT_HELLO);
     });
 
@@ -342,7 +342,7 @@ describe("buildClientHello edge cases", () => {
         const kps = await keyPairs(["x25519"]);
         for (const proto of ["", "a".repeat(256)]) {
             try {
-                buildClientHello({ ...baseConfig, alpnProtocols: [proto] }, kps);
+                buildClientHello({ ...baseConfig, alpnProtocols: [proto] }, kps, () => Math.random(), crypto);
                 expect.unreachable("expected a throw");
             } catch (e) {
                 const err = e as TlsHandshakeError;
