@@ -1,6 +1,9 @@
 /**
  * IANA TLS Supported Groups (named groups) registry — canonical name → 2-byte wire code.
  *
+ * DUPLICATED IN @browsercore/profiles/src/codes.ts — update BOTH copies when
+ * adding a new named group. No dependency between the two packages by design.
+ *
  * @see https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-parameters-8
  */
 
