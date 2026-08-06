@@ -2,7 +2,7 @@ name: Deploy coverage badge to Pages
 
 on:
   workflow_run:
-    workflows: [".github/workflows/ci.yml"]
+    workflows: ["CI"]
     types:
       - completed
     branches:
