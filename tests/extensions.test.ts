@@ -158,6 +158,7 @@ describe("wireToNamedGroup", () => {
     it("inverts every IANA wire value to its named group", () => {
         expect(wireToNamedGroup(0x0017)).toBe("secp256r1");
         expect(wireToNamedGroup(0x0018)).toBe("secp384r1");
+        expect(wireToNamedGroup(0x0019)).toBe("secp521r1");
         expect(wireToNamedGroup(0x001d)).toBe("x25519");
         expect(wireToNamedGroup(0x001e)).toBe("x448");
         expect(wireToNamedGroup(0x11ec)).toBe("X25519MLKEM768");
@@ -179,6 +180,7 @@ describe("wireToNamedGroup", () => {
         const groups: readonly NamedGroup[] = [
             "secp256r1",
             "secp384r1",
+            "secp521r1",
             "x25519",
             "x448",
             "X25519MLKEM768",
@@ -196,9 +198,19 @@ describe("wireToExtensionType (chrome-140 new types)", () => {
         expect(wireToExtensionType(17613)).toBe(ExtensionType.APPLICATION_SETTINGS);
     });
 
+    it("accepts application_settings_old at the legacy value 17513", () => {
+        expect(() => wireToExtensionType(17513)).not.toThrow();
+        expect(wireToExtensionType(17513)).toBe(ExtensionType.APPLICATION_SETTINGS_OLD);
+    });
+
     it("accepts encrypted_client_hello at 65037", () => {
         expect(() => wireToExtensionType(65037)).not.toThrow();
         expect(wireToExtensionType(65037)).toBe(ExtensionType.ENCRYPTED_CLIENT_HELLO);
+    });
+
+    it("accepts padding (RFC 7685) at 21", () => {
+        expect(() => wireToExtensionType(21)).not.toThrow();
+        expect(wireToExtensionType(21)).toBe(ExtensionType.PADDING);
     });
 });
 
