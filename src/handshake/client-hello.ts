@@ -53,6 +53,7 @@ export function generateGreaseValue(random: () => number): number {
     const index = Math.floor(random() * GREASE_VALUES.length);
     const value = GREASE_VALUES[index];
     // GREASE_VALUES.length === 16 is a constant; this is an invariant guard.
+    /* v8 ignore next 3 */
     if (value === undefined) {
         throw new TlsHandshakeError("client_hello", {
             cause: new Error("generateGreaseValue: unreachable — GREASE_VALUES is empty"),
@@ -136,6 +137,7 @@ export function buildClientHello(
     const cipherSuitesBytes = new Uint8Array(cipherWires.length * 2);
     for (let i = 0; i < cipherWires.length; i++) {
         const wire = cipherWires[i];
+        /* v8 ignore next 3 */
         if (wire === undefined) {
             throw new TlsHandshakeError("client_hello", {
                 cause: new Error(`cipher suite wire at index ${i} is missing`),
@@ -301,6 +303,7 @@ function encodeCompressCertificate(): Uint8Array {
     out[0] = (algorithms.length * 2) & 0xff;
     for (let i = 0; i < algorithms.length; i++) {
         const algo = algorithms[i];
+        /* v8 ignore next 3 */
         if (algo === undefined) {
             throw new TlsHandshakeError("client_hello", {
                 cause: new Error(`compress certificate algorithm at index ${i} is missing`),
