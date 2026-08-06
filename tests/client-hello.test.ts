@@ -17,6 +17,7 @@ import {
     buildClientHello,
     generateGreaseValue,
 } from "../src/handshake/client-hello.js";
+import { ExtensionType } from "../src/extensions/extensions.js";
 import { TlsHandshakeError } from "../src/errors.js";
 import { TLS_1_3 } from "../src/types.js";
 import type { ClientHelloConfig, KeyPair } from "../src/types.js";
@@ -146,6 +147,38 @@ describe("generateGreaseValue defensive guard (noUncheckedIndexedAccess)", () =>
         // The guard branch can't be reached without overriding GREASE_VALUES,
         // but we pin the upper-edge behavior here.
         expect(Number.isInteger(v)).toBe(true);
+    });
+});
+
+describe("encodeExtensionBody new extension encoders", () => {
+    it("emits an empty body for encrypted_client_hello (65037)", async () => {
+        const kps = await keyPairs(["x25519"]);
+        const cfg: ClientHelloConfig = {
+            ...BASE_CONFIG,
+            extensionOrder: [ExtensionType.ENCRYPTED_CLIENT_HELLO],
+        };
+        const hello = buildClientHello(cfg, kps, () => Math.random(), crypto);
+        expect(hello[0]).toBe(0x01);
+    });
+
+    it("emits an empty body for padding (21, RFC 7685)", async () => {
+        const kps = await keyPairs(["x25519"]);
+        const cfg: ClientHelloConfig = {
+            ...BASE_CONFIG,
+            extensionOrder: [ExtensionType.PADDING],
+        };
+        const hello = buildClientHello(cfg, kps, () => Math.random(), crypto);
+        expect(hello[0]).toBe(0x01);
+    });
+
+    it("emits ALPN for application_settings_old (17513)", async () => {
+        const kps = await keyPairs(["x25519"]);
+        const cfg: ClientHelloConfig = {
+            ...BASE_CONFIG,
+            extensionOrder: [ExtensionType.APPLICATION_SETTINGS_OLD],
+        };
+        const hello = buildClientHello(cfg, kps, () => Math.random(), crypto);
+        expect(hello[0]).toBe(0x01);
     });
 });
 
