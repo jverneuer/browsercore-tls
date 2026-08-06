@@ -14,6 +14,7 @@
 
 import { describe, it, expect } from "vitest";
 import { connect } from "@browsercore/transport";
+import { crypto } from "@browsercore/crypto";
 import { connectTls } from "../src/tls.js";
 import { TLS_1_3 } from "../src/types.js";
 import type { ClientHelloConfig } from "../src/types.js";
@@ -51,6 +52,7 @@ const PROFILE: ClientHelloConfig = {
             // Drive the full TLS 1.3 handshake over the live transport.
             const conn = await connectTls({
                 transport,
+                crypto,
                 serverName: "example.com",
                 profile: PROFILE,
                 handshakeTimeoutMs: 25_000,

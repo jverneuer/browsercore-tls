@@ -246,8 +246,8 @@ export class TlsServerSim {
     ): Uint8Array {
         const hash = "SHA-256" as const;
         const hashLen = hashLengthFor(hash);
-        const finishedKey = hkdfExpandLabel(serverHsTrafficSecret, "finished", new Uint8Array(0), hashLen, hash);
-        const verifyData = crypto.hmac(hash, finishedKey, transcriptHash(transcriptBeforeFinished, hash));
+        const finishedKey = hkdfExpandLabel(serverHsTrafficSecret, "finished", new Uint8Array(0), hashLen, hash, crypto);
+        const verifyData = crypto.hmac(hash, finishedKey, transcriptHash(transcriptBeforeFinished, hash, crypto));
         return this.handshakeMessage(HandshakeType.FINISHED, verifyData);
     }
 
@@ -282,7 +282,7 @@ export class TlsServerSim {
         const plaintext = concatBytes(msg, new Uint8Array([ContentType.HANDSHAKE]));
         const header = serializeRecordHeader(ContentType.APPLICATION_DATA, plaintext.length + AEAD_TAG_LENGTH);
         const nonce = xorNonce(traffic.iv, seq);
-        const ciphertext = encryptRecord(plaintext, traffic.key, nonce, header, "AES-128-GCM");
+        const ciphertext = encryptRecord(plaintext, traffic.key, nonce, header, "AES-128-GCM", crypto);
         return concatBytes(header, ciphertext);
     }
 
@@ -310,10 +310,10 @@ export class TlsServerSim {
             : crypto.x25519SharedSecret(this.serverKeys.secretKey, this.clientKeySharePub);
         const cipherSuite = "TLS_AES_128_GCM_SHA256" as const;
         const helloTranscript = [clientHelloMsg, serverHelloMsg];
-        const helloHash = transcriptHash(helloTranscript, "SHA-256");
+        const helloHash = transcriptHash(helloTranscript, "SHA-256", crypto);
         const { clientTrafficSecret, serverTrafficSecret } =
-            deriveHandshakeTrafficSecrets(sharedSecret, helloHash, cipherSuite);
-        const serverHsTraffic = deriveTrafficSecrets(serverTrafficSecret, cipherSuite, "SHA-256");
+            deriveHandshakeTrafficSecrets(sharedSecret, helloHash, cipherSuite, crypto);
+        const serverHsTraffic = deriveTrafficSecrets(serverTrafficSecret, cipherSuite, "SHA-256", crypto);
 
         // Build the server flight messages (each pushed to the transcript as the
         // client will see them post-decryption).

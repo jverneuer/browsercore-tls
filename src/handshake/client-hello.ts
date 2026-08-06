@@ -8,7 +8,7 @@
  * handshake module only consumes the bytes it produces.
  */
 
-import { crypto } from "@browsercore/crypto";
+import type { CryptoProvider } from "@browsercore/crypto";
 import type {
     CipherSuite,
     ClientHelloConfig,
@@ -41,31 +41,14 @@ export const GREASE_VALUES: readonly number[] = Object.freeze([
 ]);
 
 /**
- * Crypto-backed uniform [0,1) random source — the production default. Reads the
- * first byte of a 1-byte random draw and guards the indexed access so it satisfies
- * noUncheckedIndexedAccess without a non-null assertion (`!` is forbidden by the
- * project coding standards). The throw is unreachable (randomBytes(1) always
- * returns one byte) but keeps the types honest.
- */
-export function defaultRandomByte(): number {
-    const byte = crypto.randomBytes(1)[0];
-    if (byte === undefined) {
-        throw new TlsHandshakeError("client_hello", {
-            cause: new Error("defaultRandomByte: unreachable — randomBytes(1) returned empty"),
-        });
-    }
-    return byte / 256;
-}
-
-/**
  * Pick a uniform random GREASE value.
  *
- * The random source is injectable for deterministic tests; defaults to a
- * crypto-backed uniform [0,1) so production traffic never depends on
- * Math.random (matching the package convention that protocol code uses the
- * crypto provider, never Math).
+ * The random source is a REQUIRED parameter (no singleton fallback) so the
+ * caller — which already holds the injected CryptoProvider — controls every
+ * source of randomness. Tests pin it deterministically; production passes a
+ * crypto-backed uniform [0,1) so traffic never depends on Math.random.
  */
-export function generateGreaseValue(random: () => number = defaultRandomByte): number {
+export function generateGreaseValue(random: () => number): number {
     const index = Math.floor(random() * GREASE_VALUES.length);
     const value = GREASE_VALUES[index];
     // GREASE_VALUES.length === 16 is a constant; this is an invariant guard.
@@ -111,23 +94,25 @@ export function cipherSuiteToWire(suite: CipherSuite): number {
  * via @browsercore/crypto).
  *
  * When `config.grease` is enabled, exactly one random 0x?a?a sentinel is drawn
- * per call (from `random`, defaulting to a crypto-backed source) and reused
- * across the leading cipher suite, the leading extension type, and the leading
- * key-share group — matching real Chrome behavior (RFC 8701). The `random`
- * source is injectable so tests can pin a deterministic sentinel.
+ * per call (from `random`) and reused across the leading cipher suite, the
+ * leading extension type, and the leading key-share group — matching real
+ * Chrome behavior (RFC 8701). The `random` source and `provider` are required
+ * (no singleton fallback) so callers control all randomness; tests pin
+ * `random` for a deterministic sentinel.
  */
 export function buildClientHello(
     config: ClientHelloConfig,
     keyPairs: readonly KeyPair[],
-    random: () => number = defaultRandomByte,
+    random: () => number,
+    provider: CryptoProvider,
 ): Uint8Array {
     const greaseValue = config.grease ? generateGreaseValue(random) : 0;
 
-    const randomBytes = crypto.randomBytes(32);
+    const randomBytes = provider.randomBytes(32);
     const sessionId = new Uint8Array(0);
     const compressionMethods = new Uint8Array([0x00]);
 
-    const extensions = buildClientHelloExtensions(config, keyPairs, greaseValue);
+    const extensions = buildClientHelloExtensions(config, keyPairs, greaseValue, provider);
 
     const cipherWires: number[] = config.cipherSuites.map((suite, i) => {
         if (suite === undefined) {
@@ -195,7 +180,8 @@ export function buildClientHello(
 function buildClientHelloExtensions(
     config: ClientHelloConfig,
     keyPairs: readonly KeyPair[],
-    greaseValue: number = 0,
+    greaseValue: number,
+    provider: CryptoProvider,
 ): Uint8Array {
     const order = config.grease
         ? [greaseValue, ...config.extensionOrder]
@@ -203,7 +189,7 @@ function buildClientHelloExtensions(
 
     const parts: Uint8Array[] = [];
     for (const type of order) {
-        const body = encodeExtensionBody(type, config, keyPairs, greaseValue);
+        const body = encodeExtensionBody(type, config, keyPairs, greaseValue, provider);
         parts.push(wrapExtension(type, body));
     }
 
@@ -224,7 +210,8 @@ function encodeExtensionBody(
     type: number,
     config: ClientHelloConfig,
     keyPairs: readonly KeyPair[],
-    greaseValue: number = 0,
+    greaseValue: number,
+    provider: CryptoProvider,
 ): Uint8Array {
     switch (type) {
         case ExtensionType.SERVER_NAME:
@@ -258,7 +245,7 @@ function encodeExtensionBody(
         case ExtensionType.PSK_KEY_EXCHANGE_MODES:
             return encodePskKeyExchangeModes();
         case ExtensionType.KEY_SHARE:
-            return encodeKeyShareClient(config, keyPairs, greaseValue);
+            return encodeKeyShareClient(config, keyPairs, greaseValue, provider);
         case ExtensionType.RENEGOTIATION_INFO:
             return encodeRenegotiationInfo();
         default:
@@ -386,7 +373,8 @@ function encodeSupportedVersionsClient(versions: readonly ProtocolVersion[]): Ui
 function encodeKeyShareClient(
     config: ClientHelloConfig,
     keyPairs: readonly KeyPair[],
-    greaseValue: number = 0,
+    greaseValue: number,
+    provider: CryptoProvider,
 ): Uint8Array {
     const greaseEntry = config.grease ? 2 + 2 + GREASE_KEY_LENGTH : 0;
     let entriesLen = greaseEntry;
@@ -402,7 +390,7 @@ function encodeKeyShareClient(
         out[o++] = greaseValue & 0xff;
         out[o++] = (GREASE_KEY_LENGTH >> 8) & 0xff;
         out[o++] = GREASE_KEY_LENGTH & 0xff;
-        out.set(crypto.randomBytes(GREASE_KEY_LENGTH), o);
+        out.set(provider.randomBytes(GREASE_KEY_LENGTH), o);
         o += GREASE_KEY_LENGTH;
     }
     for (const kp of keyPairs) {

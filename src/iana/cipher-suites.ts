@@ -1,9 +1,17 @@
 /**
  * IANA TLS Cipher Suite registry — canonical name → 2-byte wire code.
  *
- * This is the single source of truth for cipher suite codes across the
- * @browsercore/* packages. The literal union `CipherSuite` in `types.ts`
- * and the wire-encoding logic in `client-hello.ts` both derive from this table.
+ * ┌─────────────────────────────────────────────────────────────────────────┐
+ * │ DUPLICATED IN @browsercore/profiles/src/codes.ts                        │
+ * │                                                                         │
+ * │ The same IANA tables exist in @browsercore/profiles (codes.ts). This is │
+ * │ intentional — no dependency between the two packages. When adding a     │
+ * │ new cipher suite, update BOTH copies.                                   │
+ * └─────────────────────────────────────────────────────────────────────────┘
+ *
+ * This is the single source of truth for cipher suite codes within
+ * @browsercore/tls. The literal union `CipherSuite` in `types.ts` and the
+ * wire-encoding logic in `client-hello.ts` both derive from this table.
  *
  * @see https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-parameters-4
  */

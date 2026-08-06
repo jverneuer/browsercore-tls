@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { crypto } from "@browsercore/crypto";
 import { generateKeyPairSync, createSign } from "node:crypto";
 import {
     parseAlpnFromEncryptedExtensions,
@@ -210,7 +211,7 @@ describe("validateCertificateChain", () => {
     it("passes hostname validation and returns the chain when the CN matches", async () => {
         const der = makeSelfSignedCert("example.com");
         const body = buildCertMessageBody([der]);
-        const chain = await validateCertificateChain(body, "example.com", [], 1_700_000_000);
+        const chain = await validateCertificateChain(body, "example.com", [], 1_700_000_000, crypto);
         expect(chain.leaf.commonName).toBe("example.com");
     });
 
@@ -218,10 +219,10 @@ describe("validateCertificateChain", () => {
         const der = makeSelfSignedCert("example.com");
         const body = buildCertMessageBody([der]);
         await expect(
-            validateCertificateChain(body, "evil.com", [], 1_700_000_000),
+            validateCertificateChain(body, "evil.com", [], 1_700_000_000, crypto),
         ).rejects.toThrow(TlsHandshakeError);
         try {
-            await validateCertificateChain(body, "evil.com", [], 1_700_000_000);
+            await validateCertificateChain(body, "evil.com", [], 1_700_000_000, crypto);
         } catch (e) {
             expect((e as TlsHandshakeError).cause?.message).toMatch(/does not match/);
         }
@@ -233,7 +234,7 @@ describe("validateCertificateChain", () => {
         const der = makeSelfSignedCert("example.com");
         const body = buildCertMessageBody([der]);
         // now must fall inside the cert's validity window (2024..2034).
-        const chain = await validateCertificateChain(body, "example.com", [der], 1_800_000_000);
+        const chain = await validateCertificateChain(body, "example.com", [der], 1_800_000_000, crypto);
         expect(chain.leaf.commonName).toBe("example.com");
     });
 
@@ -242,7 +243,7 @@ describe("validateCertificateChain", () => {
         const unrelatedAnchor = makeSelfSignedCert("ca.example.com");
         const body = buildCertMessageBody([leafDer]);
         await expect(
-            validateCertificateChain(body, "example.com", [unrelatedAnchor], 1_800_000_000),
+            validateCertificateChain(body, "example.com", [unrelatedAnchor], 1_800_000_000, crypto),
         ).rejects.toThrow(TlsHandshakeError);
     });
 });
@@ -255,7 +256,7 @@ describe("buildClientFinishedMessage", () => {
     it("emits a Finished handshake message with type 20 and a verify_data body", () => {
         const secret = new Uint8Array(32).fill(0x7c);
         const transcript = [new Uint8Array([1, 2, 3]), new Uint8Array([4, 5])];
-        const msg = buildClientFinishedMessage("SHA-256", secret, transcript);
+        const msg = buildClientFinishedMessage("SHA-256", secret, transcript, crypto);
         expect(msg[0]).toBe(20); // HandshakeType.FINISHED
         const bodyLen = (msg[1]! << 16) | (msg[2]! << 8) | msg[3]!;
         expect(bodyLen).toBe(32); // SHA-256 verify_data length
@@ -264,7 +265,7 @@ describe("buildClientFinishedMessage", () => {
 
     it("produces a 48-byte verify_data for SHA-384", () => {
         const secret = new Uint8Array(48).fill(0x7c);
-        const msg = buildClientFinishedMessage("SHA-384", secret, []);
+        const msg = buildClientFinishedMessage("SHA-384", secret, [], crypto);
         const bodyLen = (msg[1]! << 16) | (msg[2]! << 8) | msg[3]!;
         expect(bodyLen).toBe(48);
     });
@@ -286,7 +287,7 @@ function encryptHandshakeRecord(content: Uint8Array, seq: number, traffic = HS_T
     plaintext[content.length] = ContentType.HANDSHAKE; // inner type
     const header = serializeRecordHeader(ContentType.APPLICATION_DATA, plaintext.length + 16);
     const nonce = xorNonce(traffic.iv, seq);
-    const ciphertext = encryptRecord(plaintext, traffic.key, nonce, header, "AES-128-GCM");
+    const ciphertext = encryptRecord(plaintext, traffic.key, nonce, header, "AES-128-GCM", crypto);
     return concatBytes(header, ciphertext);
 }
 
@@ -299,7 +300,7 @@ describe("readEncryptedHandshakeMessage", () => {
         whole.set(body, 4);
 
         const record = encryptHandshakeRecord(whole, 0);
-        const result = await readEncryptedHandshakeMessage(record, new FakeTransport(), "AES-128-GCM", HS_TRAFFIC, 0);
+        const result = await readEncryptedHandshakeMessage(record, new FakeTransport(), "AES-128-GCM", HS_TRAFFIC, 0, crypto);
         expect(result.whole).toEqual(whole);
         expect(result.body).toEqual(body);
         expect(result.readBuffer.length).toBe(0);
@@ -309,7 +310,7 @@ describe("readEncryptedHandshakeMessage", () => {
         const header = serializeRecordHeader(ContentType.HANDSHAKE, 4);
         const buf = concatBytes(header, new Uint8Array(4));
         await expect(
-            readEncryptedHandshakeMessage(buf, new FakeTransport(), "AES-128-GCM", HS_TRAFFIC, 0),
+            readEncryptedHandshakeMessage(buf, new FakeTransport(), "AES-128-GCM", HS_TRAFFIC, 0, crypto),
         ).rejects.toThrow(TlsHandshakeError);
     });
 
@@ -320,9 +321,9 @@ describe("readEncryptedHandshakeMessage", () => {
         plaintext[content.length] = ContentType.APPLICATION_DATA;
         const header = serializeRecordHeader(ContentType.APPLICATION_DATA, plaintext.length + 16);
         const nonce = xorNonce(HS_TRAFFIC.iv, 0);
-        const ciphertext = encryptRecord(plaintext, HS_TRAFFIC.key, nonce, header, "AES-128-GCM");
+        const ciphertext = encryptRecord(plaintext, HS_TRAFFIC.key, nonce, header, "AES-128-GCM", crypto);
         await expect(
-            readEncryptedHandshakeMessage(concatBytes(header, ciphertext), new FakeTransport(), "AES-128-GCM", HS_TRAFFIC, 0),
+            readEncryptedHandshakeMessage(concatBytes(header, ciphertext), new FakeTransport(), "AES-128-GCM", HS_TRAFFIC, 0, crypto),
         ).rejects.toThrow(TlsHandshakeError);
     });
 
@@ -330,9 +331,9 @@ describe("readEncryptedHandshakeMessage", () => {
         const zeros = new Uint8Array(4).fill(0);
         const header = serializeRecordHeader(ContentType.APPLICATION_DATA, zeros.length + 16);
         const nonce = xorNonce(HS_TRAFFIC.iv, 0);
-        const ciphertext = encryptRecord(zeros, HS_TRAFFIC.key, nonce, header, "AES-128-GCM");
+        const ciphertext = encryptRecord(zeros, HS_TRAFFIC.key, nonce, header, "AES-128-GCM", crypto);
         await expect(
-            readEncryptedHandshakeMessage(concatBytes(header, ciphertext), new FakeTransport(), "AES-128-GCM", HS_TRAFFIC, 0),
+            readEncryptedHandshakeMessage(concatBytes(header, ciphertext), new FakeTransport(), "AES-128-GCM", HS_TRAFFIC, 0, crypto),
         ).rejects.toThrow(TlsHandshakeError);
     });
 
@@ -341,7 +342,7 @@ describe("readEncryptedHandshakeMessage", () => {
         const record = encryptHandshakeRecord(whole, 0);
         const wrong = { key: new Uint8Array(16).fill(0x00), iv: HS_TRAFFIC.iv };
         await expect(
-            readEncryptedHandshakeMessage(record, new FakeTransport(), "AES-128-GCM", wrong, 0),
+            readEncryptedHandshakeMessage(record, new FakeTransport(), "AES-128-GCM", wrong, 0, crypto),
         ).rejects.toThrow(TlsDecryptError);
     });
 });

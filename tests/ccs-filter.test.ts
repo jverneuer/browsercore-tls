@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { crypto } from "@browsercore/crypto";
 import { readEncryptedHandshakeMessage } from "../src/connection/handshake-messages.js";
 import { xorNonce } from "../src/connection/record-layer.js";
 import { ContentType, encryptRecord, serializeRecordHeader } from "../src/record/record.js";
@@ -49,7 +50,7 @@ function encryptHandshakeRecord(content: Uint8Array, seq: number): Uint8Array {
     plaintext[content.length] = ContentType.HANDSHAKE; // inner type
     const header = serializeRecordHeader(ContentType.APPLICATION_DATA, plaintext.length + 16);
     const nonce = xorNonce(HS_TRAFFIC.iv, seq);
-    const ciphertext = encryptRecord(plaintext, HS_TRAFFIC.key, nonce, header, "AES-128-GCM");
+    const ciphertext = encryptRecord(plaintext, HS_TRAFFIC.key, nonce, header, "AES-128-GCM", crypto);
     return concatBytes(header, ciphertext);
 }
 
@@ -75,6 +76,7 @@ describe("readEncryptedHandshakeMessage — CCS record filtering (RFC 8446 §5)"
             "AES-128-GCM",
             HS_TRAFFIC,
             0,
+            crypto,
         );
         expect(result.whole).toEqual(whole);
         expect(result.body).toEqual(body);
@@ -99,6 +101,7 @@ describe("readEncryptedHandshakeMessage — CCS record filtering (RFC 8446 §5)"
             "AES-128-GCM",
             HS_TRAFFIC,
             0,
+            crypto,
         );
         expect(result.whole).toEqual(whole);
         expect(result.body).toEqual(body);
@@ -127,6 +130,7 @@ describe("readEncryptedHandshakeMessage — CCS record filtering (RFC 8446 §5)"
             "AES-128-GCM",
             HS_TRAFFIC,
             0,
+            crypto,
         );
         expect(result.body).toEqual(body);
     });
@@ -141,7 +145,7 @@ describe("readEncryptedHandshakeMessage — CCS record filtering (RFC 8446 §5)"
         const stream = concatBytes(ccs, bad);
 
         await expect(
-            readEncryptedHandshakeMessage(stream, new FakeTransport(), "AES-128-GCM", HS_TRAFFIC, 0),
+            readEncryptedHandshakeMessage(stream, new FakeTransport(), "AES-128-GCM", HS_TRAFFIC, 0, crypto),
         ).rejects.toThrow(TlsHandshakeError);
     });
 
@@ -162,6 +166,7 @@ describe("readEncryptedHandshakeMessage — CCS record filtering (RFC 8446 §5)"
             "AES-128-GCM",
             HS_TRAFFIC,
             0,
+            crypto,
         );
         expect(result.whole).toEqual(whole);
         // The leftover bytes after both the CCS and the encrypted record must

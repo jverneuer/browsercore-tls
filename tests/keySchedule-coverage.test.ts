@@ -88,14 +88,14 @@ describe("hkdfExpandLabel — SHA-384 hash branch", () => {
         const secret = crypto.randomBytes(48);
         // SHA-384 hashLen = 48; requesting 48 bytes exercises a single-block
         // HKDF-Expand with the SHA-384 code path.
-        const out = hkdfExpandLabel(secret, "key", new Uint8Array(0), 48, SHA_384);
+        const out = hkdfExpandLabel(secret, "key", new Uint8Array(0), 48, SHA_384, crypto);
         expect(out.length).toBe(48);
     });
 
     it("produces a different result for SHA-384 vs SHA-256 at the same length", () => {
         const secret = crypto.randomBytes(48);
-        const out384 = hkdfExpandLabel(secret, "key", new Uint8Array(0), 48, SHA_384);
-        const out256 = hkdfExpandLabel(secret, "key", new Uint8Array(0), 48, SHA_256);
+        const out384 = hkdfExpandLabel(secret, "key", new Uint8Array(0), 48, SHA_384, crypto);
+        const out256 = hkdfExpandLabel(secret, "key", new Uint8Array(0), 48, SHA_256, crypto);
         expect(out384).not.toEqual(out256);
     });
 });
@@ -109,6 +109,7 @@ describe("deriveHandshakeSecrets — SHA-384 path through the derivation pipelin
             sharedSecret,
             helloTranscript,
             "TLS_AES_256_GCM_SHA384",
+            crypto,
         );
         expect(masterSecret.length).toBe(48);
         expect(traffic.client.key.length).toBe(32);
@@ -122,6 +123,7 @@ describe("deriveHandshakeSecrets — SHA-384 path through the derivation pipelin
             sharedSecret,
             helloTranscript,
             "TLS_CHACHA20_POLY1305_SHA256",
+            crypto,
         );
         expect(masterSecret.length).toBe(32);
     });
@@ -133,6 +135,7 @@ describe("deriveHandshakeSecrets — SHA-384 path through the derivation pipelin
             sharedSecret,
             helloTranscript,
             "TLS_AES_128_CCM_SHA256",
+            crypto,
         );
         expect(masterSecret.length).toBe(32);
     });

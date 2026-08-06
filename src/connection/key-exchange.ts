@@ -9,7 +9,7 @@
  * them together.
  */
 
-import { crypto, type CryptoProvider, type HashId } from "@browsercore/crypto";
+import type { CryptoProvider, HashId } from "@browsercore/crypto";
 import type { KeyPair } from "../types.js";
 import type { ServerHello } from "../handshake/handshake.js";
 import { TlsHandshakeError } from "../errors.js";
@@ -18,7 +18,7 @@ import { hkdfExpandLabel, hashLengthFor } from "../crypto/keySchedule.js";
 import { assertNever, constantTimeEqual } from "../utils.js";
 
 /** Compute the (EC)DHE shared secret from the server's selected key share. */
-export function computeSharedSecret(serverHello: ServerHello, keyPairs: readonly KeyPair[], provider: CryptoProvider = crypto): Uint8Array {
+export function computeSharedSecret(serverHello: ServerHello, keyPairs: readonly KeyPair[], provider: CryptoProvider): Uint8Array {
     const extensions = parseExtensions(serverHello.extensions);
     const keyShare = findExtension(extensions, ExtensionType.KEY_SHARE);
     if (keyShare === undefined) {
@@ -80,7 +80,7 @@ export function computeSharedSecret(serverHello: ServerHello, keyPairs: readonly
 }
 
 /** Hash the current handshake transcript with the negotiated cipher's hash. */
-export function transcriptHash(transcript: readonly Uint8Array[], hash: HashId, provider: CryptoProvider = crypto): Uint8Array {
+export function transcriptHash(transcript: readonly Uint8Array[], hash: HashId, provider: CryptoProvider): Uint8Array {
     const blob = transcript.reduce((acc, msg) => {
         const next = new Uint8Array(acc.length + msg.length);
         next.set(acc, 0);
@@ -100,7 +100,7 @@ export function verifyServerFinished(
     transcript: Uint8Array,
     hash: HashId,
     serverHsTrafficSecret: Uint8Array,
-    provider: CryptoProvider = crypto,
+    provider: CryptoProvider,
 ): void {
     const hashLen = hashLengthFor(hash);
     if (body.length !== hashLen) {
@@ -108,7 +108,7 @@ export function verifyServerFinished(
             cause: new Error(`server Finished length ${body.length} != expected ${hashLen}`),
         });
     }
-    const finishedKey = hkdfExpandLabel(serverHsTrafficSecret, "finished", new Uint8Array(0), hashLen, hash);
+    const finishedKey = hkdfExpandLabel(serverHsTrafficSecret, "finished", new Uint8Array(0), hashLen, hash, provider);
     const expected = provider.hmac(hash, finishedKey, transcript);
     if (!constantTimeEqual(body, expected)) {
         throw new TlsHandshakeError("finished", {

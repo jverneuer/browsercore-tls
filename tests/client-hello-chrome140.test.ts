@@ -135,7 +135,7 @@ describe("Bug 1: cipherSuiteToWire maps every offered suite to a valid wire valu
     it("never emits 0x0000 for any chrome-140 offered suite", async () => {
         const config = chrome140Config();
         const kps = await makeKeyPairs();
-        const hello = buildClientHello(config, kps);
+        const hello = buildClientHello(config, kps, () => Math.random(), crypto);
         // Walk to cipher_suites and assert no 0x0000 pair.
         let o = 4 + 2 + 32;
         o += 1 + hello[o]!; // session id
@@ -154,7 +154,7 @@ describe("Bug 2: extensions are emitted in the profile's exact order, all 16 of 
         // ignored the profile entirely.
         const config = chrome140Config();
         const kps = await makeKeyPairs();
-        const hello = buildClientHello(config, kps);
+        const hello = buildClientHello(config, kps, () => Math.random(), crypto);
         const extBlock = extractExtensionsBlock(hello);
         const extensions = parseExtensions(extBlock);
         const types = extensions.map((e) => e.type);
@@ -170,7 +170,7 @@ describe("Bug 2: extensions are emitted in the profile's exact order, all 16 of 
     it("emits all 16 profile extensions (not just the 5 hardcoded ones)", async () => {
         const config = chrome140Config();
         const kps = await makeKeyPairs();
-        const hello = buildClientHello(config, kps);
+        const hello = buildClientHello(config, kps, () => Math.random(), crypto);
         const extBlock = extractExtensionsBlock(hello);
         const extensions = parseExtensions(extBlock);
         // 1 GREASE + 16 profile extensions.
@@ -190,7 +190,7 @@ describe("Bug 2: extensions are emitted in the profile's exact order, all 16 of 
             grease: false,
         };
         const kps = await makeKeyPairs();
-        const hello = buildClientHello(config, kps);
+        const hello = buildClientHello(config, kps, () => Math.random(), crypto);
         const extBlock = extractExtensionsBlock(hello);
         const extensions = parseExtensions(extBlock);
         const types = extensions.map((e) => e.type);
@@ -204,7 +204,7 @@ describe("Bug 3: GREASE values are generated when grease=true", () => {
         const config = chrome140Config();
         const kps = await makeKeyPairs();
         // Fix the random source so the assertion is deterministic.
-        const hello = buildClientHello(config, kps, () => 0.0);
+        const hello = buildClientHello(config, kps, () => 0.0, crypto);
         let o = 4 + 2 + 32;
         o += 1 + hello[o]!; // session id
         const csLen = (hello[o]! << 8) | hello[o + 1]!;
@@ -219,7 +219,7 @@ describe("Bug 3: GREASE values are generated when grease=true", () => {
     it("prepends a GREASE extension ahead of the profile order", async () => {
         const config = chrome140Config();
         const kps = await makeKeyPairs();
-        const hello = buildClientHello(config, kps, () => 0.0);
+        const hello = buildClientHello(config, kps, () => 0.0, crypto);
         const extBlock = extractExtensionsBlock(hello);
         const extensions = parseExtensions(extBlock);
         expect(extensions[0]!.type).toBe(GREASE_VALUES[0]);
@@ -229,7 +229,7 @@ describe("Bug 3: GREASE values are generated when grease=true", () => {
     it("prepends a GREASE key-share group in the key_share extension", async () => {
         const config = chrome140Config();
         const kps = await makeKeyPairs();
-        const hello = buildClientHello(config, kps, () => 0.0);
+        const hello = buildClientHello(config, kps, () => 0.0, crypto);
         const extBlock = extractExtensionsBlock(hello);
         const extensions = parseExtensions(extBlock);
         const ks = extensions.find((e) => e.type === ExtensionType.KEY_SHARE);
@@ -252,7 +252,7 @@ describe("Bug 3: GREASE values are generated when grease=true", () => {
             grease: false,
         };
         const kps = await makeKeyPairs();
-        const hello = buildClientHello(config, kps);
+        const hello = buildClientHello(config, kps, () => Math.random(), crypto);
 
         // No GREASE cipher suite at the front.
         let o = 4 + 2 + 32;

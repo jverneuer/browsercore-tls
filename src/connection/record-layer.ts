@@ -14,7 +14,7 @@
  */
 
 import type { Transport } from "@browsercore/transport";
-import { crypto, type CryptoProvider } from "@browsercore/crypto";
+import type { CryptoProvider } from "@browsercore/crypto";
 import type { TrafficSecrets } from "../types.js";
 import { TlsDecryptError, TlsHandshakeError } from "../errors.js";
 import { ContentType, decryptRecord, encryptRecord, parseRecordHeader, readContentType, serializeRecordHeader } from "../record/record.js";
@@ -115,7 +115,7 @@ export async function readEncryptedRecord(
     aead: Parameters<typeof encryptRecord>[4],
     traffic: TrafficSecrets,
     seq: number,
-    provider: CryptoProvider = crypto,
+    provider: CryptoProvider,
 ): Promise<{ innerType: ContentType; content: Uint8Array; readBuffer: Uint8Array }> {
     const header = await readHeaderBytes(readBuffer, transport);
     const record = await readRawRecord(header.readBuffer, transport, header);
@@ -163,7 +163,7 @@ export function writeEncryptedRecord(
     innerType: ContentType,
     content: Uint8Array,
     seq: number,
-    provider: CryptoProvider = crypto,
+    provider: CryptoProvider,
 ): void {
     const plaintext = concat(content, new Uint8Array([innerType]));
     const header = serializeRecordHeader(ContentType.APPLICATION_DATA, plaintext.length + AEAD_TAG_LENGTH);

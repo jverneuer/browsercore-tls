@@ -14,7 +14,7 @@
  *                     the BEGIN/END text wrapper; downstream code sees raw DER)
  */
 
-import { crypto, type CryptoProvider } from "@browsercore/crypto";
+import type { CryptoProvider } from "@browsercore/crypto";
 import type { SignatureScheme } from "../types.js";
 import { TlsHandshakeError, ensureTlsError } from "../errors.js";
 import { constantTimeEqual } from "../utils.js";
@@ -266,7 +266,7 @@ export function verifyChain(
     trustAnchors: readonly TrustAnchor[],
     hostname: string,
     now: number,
-    provider: CryptoProvider = crypto,
+    provider: CryptoProvider,
 ): Promise<void> {
     // Not async: crypto.verifySignature returns a synchronous boolean (awaiting it
     // would be an error). Synchronous throws are caught and returned as a rejected

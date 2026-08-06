@@ -9,7 +9,7 @@
  * record layer and the handshake state machine.
  */
 
-import { crypto, type CryptoProvider, type HashId } from "@browsercore/crypto";
+import type { CryptoProvider, HashId } from "@browsercore/crypto";
 import type { Transport } from "@browsercore/transport";
 import type { TrafficSecrets } from "../types.js";
 import { TlsHandshakeError } from "../errors.js";
@@ -103,6 +103,7 @@ export async function validateCertificateChain(
     serverName: string,
     trustAnchors: readonly Uint8Array[],
     now: number,
+    provider: CryptoProvider,
 ): Promise<CertificateChain> {
     const chain = parseCertificateMessage(body);
     if (!validateHostname(chain.leaf, serverName)) {
@@ -120,7 +121,7 @@ export async function validateCertificateChain(
             const root = parseCertificate(der);
             return { subjectPublicKeyInfo: root.subjectPublicKeyInfo, subject: root.issuer };
         });
-        await verifyChain(chain, anchors, serverName, now);
+        await verifyChain(chain, anchors, serverName, now, provider);
     }
     return chain;
 }
@@ -130,11 +131,11 @@ export function buildClientFinishedMessage(
     hash: HashId,
     clientHsTrafficSecret: Uint8Array,
     transcript: readonly Uint8Array[],
-    provider: CryptoProvider = crypto,
+    provider: CryptoProvider,
 ): Uint8Array {
     const hashLen = hashLengthFor(hash);
     const finishedKey = hkdfExpandLabel(clientHsTrafficSecret, "finished", new Uint8Array(0), hashLen, hash, provider);
-    const verifyData = provider.hmac(hash, finishedKey, transcriptHash(transcript, hash))
+    const verifyData = provider.hmac(hash, finishedKey, transcriptHash(transcript, hash, provider))
     const message = new Uint8Array(4 + verifyData.length);
     message[0] = 20; // HandshakeType.FINISHED
     message[1] = (verifyData.length >> 16) & 0xff;
@@ -155,7 +156,7 @@ export async function readEncryptedHandshakeMessage(
     aead: Parameters<typeof encryptRecord>[4],
     traffic: TrafficSecrets,
     seq: number,
-    provider: CryptoProvider = crypto,
+    provider: CryptoProvider,
 ): Promise<{ whole: Uint8Array; body: Uint8Array; readBuffer: Uint8Array }> {
     // RFC 8446 §5: a TLS 1.3 server may send a single change_cipher_spec record
     // (content type 20) between ServerHello and the encrypted flight for

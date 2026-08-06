@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { crypto } from "@browsercore/crypto";
 import { generateKeyPairSync, createSign } from "node:crypto";
 import {
     parseCertificate,
@@ -561,7 +562,7 @@ describe("verifyChain intermediate-CA enforcement", () => {
             subject: intermediate.issuer,
         };
         await expect(
-            verifyChain(chain, [anchor], "example.com", Math.floor(Date.UTC(2025, 0, 1) / 1000)),
+            verifyChain(chain, [anchor], "example.com", Math.floor(Date.UTC(2025, 0, 1) / 1000), crypto),
         ).rejects.toMatchObject({ cause: { message: expect.stringMatching(/missing basicConstraints cA/) } });
     });
 
@@ -580,7 +581,7 @@ describe("verifyChain intermediate-CA enforcement", () => {
             subject: ca.issuer,
         };
         await expect(
-            verifyChain(chain, [anchor], "example.com", Math.floor(Date.UTC(2025, 0, 1) / 1000)),
+            verifyChain(chain, [anchor], "example.com", Math.floor(Date.UTC(2025, 0, 1) / 1000), crypto),
         ).resolves.toBeUndefined();
     });
 });
