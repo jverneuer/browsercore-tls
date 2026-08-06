@@ -51,7 +51,7 @@
         "registry": "https://registry.npmjs.org/"
     },
     "dependencies": {
-        "@browsercore/transport": "0.2.0"
+        "@browsercore/transport": "0.2.3"
     },
     "engines": {
         "node": ">=26.0.0"
