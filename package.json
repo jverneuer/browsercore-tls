@@ -49,6 +49,7 @@
         "registry": "https://registry.npmjs.org/"
     },
     "dependencies": {
+        "@browsercore/contracts": "0.1.4",
         "@browsercore/transport": "0.2.4"
     },
     "engines": {

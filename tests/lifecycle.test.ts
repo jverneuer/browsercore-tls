@@ -12,11 +12,9 @@ import {
     ensureOpen,
     handleAlert,
     handlePostHandshakeRecord,
-    emitError,
-    notifyClose,
     withTimeout,
 } from "../src/connection/lifecycle.js";
-import { TlsAlertError, TlsError, TlsHandshakeError } from "../src/errors.js";
+import { TlsAlertError, TlsHandshakeError } from "../src/errors.js";
 import { ContentType } from "../src/record/record.js";
 
 describe("withTimeout", () => {
@@ -146,36 +144,4 @@ describe("ensureOpen", () => {
     });
 });
 
-describe("emitError", () => {
-    it("invokes every registered error listener exactly once with the error", () => {
-        const a = vi.fn();
-        const b = vi.fn();
-        const err = new TlsError("kaboom");
-        emitError([a, b], err);
-        expect(a).toHaveBeenCalledWith(err);
-        expect(b).toHaveBeenCalledWith(err);
-    });
 
-    it("is a no-op with no listeners", () => {
-        const err = new TlsError("lonely");
-        expect(() => emitError([], err)).not.toThrow();
-    });
-});
-
-describe("notifyClose", () => {
-    it("invokes every registered close listener with the reason", () => {
-        const a = vi.fn();
-        const b = vi.fn();
-        const reason = { kind: "close_notify" as const };
-        notifyClose([a, b], reason);
-        expect(a).toHaveBeenCalledWith(reason);
-        expect(b).toHaveBeenCalledWith(reason);
-    });
-
-    it("passes the transport_closed reason through unchanged", () => {
-        const a = vi.fn();
-        const reason = { kind: "transport_closed" as const };
-        notifyClose([a], reason);
-        expect(a).toHaveBeenCalledWith(reason);
-    });
-});

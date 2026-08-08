@@ -12,7 +12,7 @@
  * its internals: tls.ts imports from here, never from the individual modules.
  */
 
-export { ensureOpen, handleAlert, handlePostHandshakeRecord, emitError, notifyClose, withTimeout } from "./lifecycle.js";
+export { ensureOpen, handleAlert, handlePostHandshakeRecord, withTimeout } from "./lifecycle.js";
 export { computeSharedSecret, transcriptHash, verifyServerFinished } from "./key-exchange.js";
 export {
     buildClientFinishedMessage,

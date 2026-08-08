@@ -20,6 +20,7 @@
  * this file focused on the public surface.
  */
 
+import type { EventProvider } from "@browsercore/contracts";
 import type { CryptoProvider, HashId } from "@browsercore/crypto";
 import type { Transport } from "@browsercore/transport";
 import {
@@ -48,8 +49,6 @@ import {
     ensureOpen,
     handleAlert as handleAlertRecord,
     handlePostHandshakeRecord as dispatchPostHandshakeRecord,
-    emitError,
-    notifyClose,
     withTimeout,
     readEncryptedRecord,
     writeEncryptedRecord,
@@ -173,9 +172,15 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
     /** Decrypted application payloads awaiting consumption by read(). */
     private appReadQueue: Uint8Array[] = [];
 
-    /** Lifecycle observers. */
-    private closeListeners: ((reason: CloseReason) => void)[] = [];
-    private errorListeners: ((error: TlsError) => void)[] = [];
+    /**
+     * Injected event provider backend (decouples from node:events).
+     *
+     * Lifecycle events ("close", "error") are delegated to this provider, which
+     * is supplied by the composition root (browsersmith). No fallback is created
+     * here — the field is definitely assigned from `options.events` when options
+     * is provided; a no-arg construction leaves it unset (tests only).
+     */
+    private readonly events!: EventProvider;
 
     // `options` is optional so a connection can be constructed in isolation (e.g.
     // to assert on its default public fields) without a live transport. The real
@@ -188,6 +193,14 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
         this.clock = options?.clock ?? systemClock;
         this.crypto = provider;
         if (options !== undefined) {
+            // `events` is required — a missing provider is a composition-root bug,
+            // so fail fast with a typed error rather than silently dropping events.
+            if (options.events === undefined) {
+                throw new TlsHandshakeError("client_hello", {
+                    cause: new Error("TlsConnectionImpl requires an injected EventProvider (options.events)"),
+                });
+            }
+            this.events = options.events;
             this.transport = options.transport;
             this.serverName = options.serverName;
             this.trustAnchors = options.trustAnchors ?? [];
@@ -198,6 +211,46 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
                     ? { ...options.profile, alpnProtocols: options.alpnProtocols }
                     : options.profile;
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // EventProvider delegation — decouples the connection from node:events.
+    //
+    // The injected EventProvider backend is the single source of truth for
+    // lifecycle events. These methods forward to it so the connection stays
+    // backend-agnostic (Node EventEmitter, EventTarget, mock).
+    // -------------------------------------------------------------------------
+
+    public on(event: "close" | "error", listener: (arg: CloseReason | TlsError) => void): this {
+        // The injected provider type-erases listener args to `unknown`; cast at
+        // the boundary (safe — callers pass "close"/"error" args per the
+        // typed signature, and the provider forwards them verbatim).
+        this.events.on(event, listener as (...args: unknown[]) => void);
+        return this;
+    }
+
+    public once(event: string, listener: (...args: unknown[]) => void): void {
+        this.events.once(event, listener);
+    }
+
+    public off(event: string, listener: (...args: unknown[]) => void): void {
+        this.events.off(event, listener);
+    }
+
+    public removeListener(event: string, listener: (...args: unknown[]) => void): void {
+        this.events.removeListener(event, listener);
+    }
+
+    public emit(event: string, ...args: unknown[]): boolean {
+        return this.events.emit(event, ...args);
+    }
+
+    public listenerCount(event: string): number {
+        return this.events.listenerCount(event);
+    }
+
+    public removeAllListeners(event?: string): void {
+        this.events.removeAllListeners(event);
     }
 
     // -------------------------------------------------------------------------
@@ -307,18 +360,9 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
         }
         await this.transport.close();
         this.transition({ state: "closed", reason: { kind: "close_notify" } });
-        notifyClose(this.closeListeners, { kind: "close_notify" });
-    }
-
-    public on(event: "close" | "error", listener: (arg: CloseReason | TlsError) => void): this {
-        // A listener accepting the union is assignable to each slot by parameter
-        // contravariance — no cast needed (the one that lived here was redundant).
-        if (event === "close") {
-            this.closeListeners.push(listener);
-        } else {
-            this.errorListeners.push(listener);
-        }
-        return this;
+        // Surface the close to observers via the injected provider (decouples
+        // from node:events — no listener-array bookkeeping lives here anymore).
+        this.events.emit("close", { kind: "close_notify" });
     }
 
     // -------------------------------------------------------------------------
@@ -367,7 +411,9 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
                 return;
             }
             if (error !== undefined) {
-                emitError(this.errorListeners, ensureTlsError(error));
+                // Surface the error to observers via the injected provider
+                // (decouples from node:events — delegated, not re-emitted here).
+                this.events.emit("error", ensureTlsError(error));
             }
             return;
         }

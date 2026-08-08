@@ -18,6 +18,7 @@ import { crypto } from "@browsercore/crypto";
 import { connectTls } from "../src/tls.js";
 import { TLS_1_3 } from "../src/types.js";
 import type { ClientHelloConfig } from "../src/types.js";
+import { createMockEventProvider } from "./test-helpers.js";
 
 const RUN_LIVE_TESTS = process.env.RUN_LIVE_TESTS === "1";
 
@@ -56,6 +57,7 @@ const PROFILE: ClientHelloConfig = {
                 serverName: "example.com",
                 profile: PROFILE,
                 handshakeTimeoutMs: 25_000,
+                events: createMockEventProvider(),
             });
 
             // The handshake reached the "open" state — ServerHello was received,
