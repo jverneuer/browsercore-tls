@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { crypto, defaultX25519Backend } from "@browsercore/crypto";
+import { NobleX25519Backend } from "@browsercore/crypto";
 import { connectTls } from "../src/tls.js";
 import { TlsHandshakeError } from "../src/errors.js";
 import { ContentType } from "../src/record/record.js";
@@ -86,7 +86,7 @@ describe("connectTls full handshake (runHandshake)", () => {
         // hides X25519 regressions. Injecting an independent backend breaks
         // that: if the client's X25519 drifts from the noble backend's, the
         // derived traffic secrets diverge and the Finished verify fails.
-        const sim = new TlsServerSim({ x25519Backend: defaultX25519Backend });
+        const sim = new TlsServerSim({ x25519Backend: new NobleX25519Backend() });
         const transport = new HandshakeTransport(sim);
         const conn = await connectTls({
             transport,
