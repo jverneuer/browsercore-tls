@@ -193,6 +193,10 @@ function buildClientHelloExtensions(
     const parts: Uint8Array[] = [];
     for (const type of order) {
         const body = encodeExtensionBody(type, config, keyPairs, greaseValue, provider);
+        // Unknown extension types return undefined (no encoder). Skip them so
+        // they don't bloat the ClientHello. GREASE, padding, SCT, EMS, etc. all
+        // legitimately produce zero-length bodies — they must still be emitted.
+        if (body === undefined) { continue; }
         parts.push(wrapExtension(type, body));
     }
 
@@ -215,7 +219,7 @@ function encodeExtensionBody(
     keyPairs: readonly KeyPair[],
     greaseValue: number,
     provider: CryptoProvider,
-): Uint8Array {
+): Uint8Array | undefined {
     switch (type) {
         case ExtensionType.SERVER_NAME:
             return encodeServerNameList(config.serverName);
@@ -264,18 +268,25 @@ function encodeExtensionBody(
             if (isGreaseValue(type)) {
                 return new Uint8Array(0);
             }
-            throw new TlsHandshakeError("client_hello", {
-                cause: new Error(`no encoder for extension type 0x${type.toString(16)}`),
-            });
+            // Unknown extension type (e.g. extended_random 0x1c, or 0x22 in the
+            // firefox-128 profile): return undefined so the caller skips it.
+            return undefined;
     }
 }
 
 function encodeSupportedGroups(groups: readonly NamedGroup[]): Uint8Array {
-    const out = new Uint8Array(2 + groups.length * 2);
-    out[0] = ((groups.length * 2) >> 8) & 0xff;
-    out[1] = (groups.length * 2) & 0xff;
-    for (let i = 0; i < groups.length; i++) {
-        const group = groups[i];
+    // The crypto backend has no post-quantum support, so strip hybrid
+    // post-quantum groups from supported_groups. They are only useful as a
+    // fingerprint signal when the server cannot actually select them — and a
+    // server that does select one would produce a key_share we can't answer.
+    const encodable = groups.filter(
+        (g) => g !== "X25519MLKEM768" && g !== "X25519Kyber768",
+    );
+    const out = new Uint8Array(2 + encodable.length * 2);
+    out[0] = ((encodable.length * 2) >> 8) & 0xff;
+    out[1] = (encodable.length * 2) & 0xff;
+    for (let i = 0; i < encodable.length; i++) {
+        const group = encodable[i];
         if (group === undefined) {
             throw new TlsHandshakeError("client_hello", {
                 cause: new Error(`supported group at index ${i} is missing`),
@@ -379,9 +390,19 @@ function encodeKeyShareClient(
     greaseValue: number,
     provider: CryptoProvider,
 ): Uint8Array {
+    // The crypto backend has no post-quantum support, so the key_share entry
+    // must only carry x25519 (and the NIST curves). Skip hybrid groups like
+    // X25519MLKEM768 / X25519Kyber768 — they are advertised in supported_groups
+    // for fingerprint compatibility but cannot be keyed here.
+    const nonHybridKeyPairs = keyPairs.filter(
+        (kp) => {
+            const algorithm = kp.algorithm as NamedGroup;
+            return algorithm !== "X25519MLKEM768" && algorithm !== "X25519Kyber768";
+        },
+    );
     const greaseEntry = config.grease ? 2 + 2 + GREASE_KEY_LENGTH : 0;
     let entriesLen = greaseEntry;
-    for (const kp of keyPairs) {
+    for (const kp of nonHybridKeyPairs) {
         entriesLen += 2 + 2 + kp.publicKey.length;
     }
     const out = new Uint8Array(2 + entriesLen);
@@ -396,7 +417,7 @@ function encodeKeyShareClient(
         out.set(provider.randomBytes(GREASE_KEY_LENGTH), o);
         o += GREASE_KEY_LENGTH;
     }
-    for (const kp of keyPairs) {
+    for (const kp of nonHybridKeyPairs) {
         const groupWire = namedGroupToWire(kp.algorithm);
         out[o++] = (groupWire >> 8) & 0xff;
         out[o++] = groupWire & 0xff;

@@ -195,21 +195,17 @@ describe("encodeExtensionBody default branch", () => {
         expect(hello[0]).toBe(0x01);
     });
 
-    it("throws for an unrecognized extension type that is NOT a GREASE value", async () => {
+    it("silently skips an unrecognized extension type that is NOT a GREASE value", async () => {
         // A non-GREASE, non-known type (e.g. 0x9999) hits the default branch,
-        // fails the isGreaseValue check, and throws.
+        // returns undefined, and is skipped — the handshake must not abort.
         const kps = await keyPairs(["x25519"]);
         const cfg: ClientHelloConfig = {
             ...BASE_CONFIG,
             extensionOrder: [0x9999],
         };
-        try {
-            buildClientHello(cfg, kps, () => Math.random(), crypto);
-            expect.unreachable("expected a throw");
-        } catch (e) {
-            const err = e as TlsHandshakeError;
-            expect(err.phase).toBe("client_hello");
-            expect(err.cause?.message).toMatch(/no encoder for extension type/);
-        }
+        // Should not throw — just omit the unknown extension
+        const hello = buildClientHello(cfg, kps, () => Math.random(), crypto);
+        expect(hello).toBeInstanceOf(Uint8Array);
+        expect(hello.length).toBeGreaterThan(0);
     });
 });
