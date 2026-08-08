@@ -147,6 +147,32 @@ describe("wireToCipherSuite — TLS_CHACHA20_POLY1305_SHA256 and AES_128_CCM cas
     });
 });
 
+describe("TLS 1.2 cipher suite downgrade error", () => {
+    it("throws a clear error when the server negotiates a TLS 1.2 cipher suite (0x002f)", () => {
+        const body = buildServerHelloBody({ cipherSuite: 0x002f });
+        try {
+            parseServerHello(body, OFFERED);
+            expect.unreachable("expected a throw");
+        } catch (e) {
+            const err = e as TlsHandshakeError;
+            expect(err).toBeInstanceOf(TlsHandshakeError);
+            expect(err.phase).toBe("server_hello");
+            expect(err.cause?.message).toMatch(/TLS 1\.2 cipher suite/u);
+        }
+    });
+
+    it("throws a clear error for another TLS 1.2 cipher suite (0xc02f)", () => {
+        const body = buildServerHelloBody({ cipherSuite: 0xc02f });
+        try {
+            parseServerHello(body, OFFERED);
+            expect.unreachable("expected a throw");
+        } catch (e) {
+            const err = e as TlsHandshakeError;
+            expect(err.cause?.message).toMatch(/TLS 1\.2 cipher suite/u);
+        }
+    });
+});
+
 describe("readByte byte-truncation guard (server-hello.ts line 84)", () => {
     it("throws when the first readByte indexes past the buffer's contents", () => {
         const realBody = buildServerHelloBody();
