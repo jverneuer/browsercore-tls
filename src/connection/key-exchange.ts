@@ -51,35 +51,39 @@ export function computeSharedSecret(serverHello: ServerHello, keyPairs: readonly
         });
     }
     const serverPublicKey = keyShare.data.subarray(4, 4 + keyLen);
-    const myPair = keyPairs.find((kp) => kp.algorithm === group);
+    // Post-quantum hybrid groups (X25519MLKEM768, X25519Kyber768) are advertised
+    // in supported_groups for fingerprint compatibility, but the crypto backend
+    // has no post-quantum support. If a server selects one, fall back to the
+    // classical x25519 half of the hybrid: use the x25519 key pair against the
+    // server's x25519 key share (the server sends only its classical share when
+    // the client never offered a post-quantum key).
+    const exchangeGroup = (group === "X25519MLKEM768" || group === "X25519Kyber768") ? "x25519" : group;
+    const myPair = keyPairs.find((kp) => kp.algorithm === exchangeGroup);
     if (myPair === undefined) {
         throw new TlsHandshakeError("server_hello", {
             cause: new Error(`server selected key share group ${group} we did not offer`),
         });
     }
-    switch (group) {
+    switch (exchangeGroup) {
         case "x25519":
             return provider.x25519SharedSecret(myPair.privateKey, serverPublicKey);
         case "secp256r1":
         case "secp384r1":
-            return provider.ecdhSharedSecret(group, myPair.privateKey, serverPublicKey);
+            return provider.ecdhSharedSecret(exchangeGroup, myPair.privateKey, serverPublicKey);
         case "secp521r1":
         case "x448":
         case "ffdhe2048":
         case "ffdhe3072":
-        case "X25519MLKEM768":
-        case "X25519Kyber768":
             // @browsercore/crypto only exposes X25519 and the two NIST ECDH
             // curves (secp256r1, secp384r1) today. Other (EC)DHE groups
-            // (secp521r1, x448, FFDHE, and the post-quantum hybrids) would need
-            // a backend we do not have — fail fast and typed rather than
-            // producing a bogus secret.
+            // (secp521r1, x448, FFDHE) would need a backend we do not have —
+            // fail fast and typed rather than producing a bogus secret.
             throw new TlsHandshakeError("server_hello", {
-                cause: new Error(`key exchange for group ${group} is not supported by the crypto backend`),
+                cause: new Error(`key exchange for group ${exchangeGroup} is not supported by the crypto backend`),
             });
         default:
             // All NamedGroup members are handled above — this is unrepresentable.
-            return assertNever(group);
+            return assertNever(exchangeGroup);
     }
 }
 

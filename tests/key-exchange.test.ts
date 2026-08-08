@@ -187,6 +187,36 @@ describe("computeSharedSecret", () => {
             expect((e as TlsHandshakeError).cause?.message).toMatch(/not supported by the crypto backend/);
         }
     });
+
+    it("falls back to x25519 when server selects X25519MLKEM768 (0x11ec)", () => {
+        // Post-quantum hybrid groups are advertised for fingerprint compatibility
+        // but the crypto backend has no PQ support. The code falls back to the
+        // classical x25519 half and computes the shared secret normally.
+        const client = crypto.x25519GenerateKeyPair();
+        const peer = crypto.x25519GenerateKeyPair();
+        const expectedSecret = crypto.x25519SharedSecret(client.secretKey, peer.publicKey);
+
+        const keyPairs: KeyPair[] = [
+            { algorithm: "x25519", privateKey: client.secretKey, publicKey: client.publicKey },
+        ];
+        // Server sends x25519 key share but with X25519MLKEM768 wire value (0x11ec)
+        const sh = serverHelloWithKeyShare(0x11ec, peer.publicKey);
+        const secret = computeSharedSecret(sh, keyPairs, crypto);
+        expect(secret).toEqual(expectedSecret);
+    });
+
+    it("falls back to x25519 when server selects X25519Kyber768 (0x6399)", () => {
+        const client = crypto.x25519GenerateKeyPair();
+        const peer = crypto.x25519GenerateKeyPair();
+        const expectedSecret = crypto.x25519SharedSecret(client.secretKey, peer.publicKey);
+
+        const keyPairs: KeyPair[] = [
+            { algorithm: "x25519", privateKey: client.secretKey, publicKey: client.publicKey },
+        ];
+        const sh = serverHelloWithKeyShare(0x6399, peer.publicKey);
+        const secret = computeSharedSecret(sh, keyPairs, crypto);
+        expect(secret).toEqual(expectedSecret);
+    });
 });
 
 describe("transcriptHash", () => {

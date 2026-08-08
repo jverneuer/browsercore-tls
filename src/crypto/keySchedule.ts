@@ -274,8 +274,17 @@ export function deriveHandshakeTrafficSecrets(
     // early_secret = HKDF-Extract(0, 0)
     const earlySecret = hkdfExtract(hash, zeros, zeros, provider)
 
-    // derived = HKDF-Expand-Label(early_secret, "derived", "", Hash.length)
-    const derived = hkdfExpandLabel(earlySecret, "derived", new Uint8Array(0), hashLen, hash, provider);
+    // Derive-Secret(., "derived", "") = HKDF-Expand-Label(., "derived", Hash(""), Hash.length)
+    // The context for "derived" is Transcript-Hash of an empty message list,
+    // which is Hash(empty) — NOT empty bytes. This was the root cause of Bug 6:
+    // passing empty bytes instead of Hash(empty) produced wrong salt for
+    // HKDF-Extract, corrupting the entire downstream key schedule.
+    const emptyHash = hash === "SHA-384"
+        ? provider.sha384(new Uint8Array(0))
+        : provider.sha256(new Uint8Array(0));
+
+    // derived = Derive-Secret(early_secret, "derived", "")
+    const derived = hkdfExpandLabel(earlySecret, "derived", emptyHash, hashLen, hash, provider);
 
     // handshake_secret = HKDF-Extract(derived, sharedSecret)
     const handshakeSecret = hkdfExtract(hash, derived, sharedSecret, provider);
@@ -285,7 +294,7 @@ export function deriveHandshakeTrafficSecrets(
     const serverTrafficSecret = hkdfExpandLabel(handshakeSecret, "s hs traffic", helloTranscript, hashLen, hash, provider)
 
     // master_secret = HKDF-Extract(Derive-Secret(handshake_secret, "derived", ""), 0)
-    const masterDerived = hkdfExpandLabel(handshakeSecret, "derived", new Uint8Array(0), hashLen, hash, provider);
+    const masterDerived = hkdfExpandLabel(handshakeSecret, "derived", emptyHash, hashLen, hash, provider);
     const masterSecret = hkdfExtract(hash, masterDerived, zeros, provider)
 
     return { masterSecret, clientTrafficSecret, serverTrafficSecret };
