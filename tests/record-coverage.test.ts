@@ -8,7 +8,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { crypto, type CryptoProvider } from "@browsercore/crypto";
+import { createTestCryptoProvider } from "./test-helpers.js";
+import type { CryptoProvider } from "@browsercore/contracts";
+
+const crypto = createTestCryptoProvider();
 import {
     cipherSuiteToAead,
     decryptRecord,

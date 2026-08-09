@@ -14,11 +14,12 @@
 
 import { describe, it, expect } from "vitest";
 import { connect } from "@browsercore/transport";
-import { crypto } from "@browsercore/crypto";
+import { createMockEventProvider, createTestCryptoProvider } from "./test-helpers.js";
+
+const crypto = createTestCryptoProvider();
 import { connectTls } from "../src/tls.js";
 import { TLS_1_3 } from "../src/types.js";
 import type { ClientHelloConfig } from "../src/types.js";
-import { createMockEventProvider } from "./test-helpers.js";
 
 const RUN_LIVE_TESTS = process.env.RUN_LIVE_TESTS === "1";
 

@@ -7,8 +7,9 @@
  * type system would reject but that is a valid runtime string.
  */
 
-import { describe, it, expect, vi } from "vitest";
-import { crypto } from "@browsercore/crypto";
+import { describe, it, expect } from "vitest";
+import { createTestCryptoProvider } from "./test-helpers.js";
+import type { CryptoProvider } from "@browsercore/contracts";
 import {
     encryptRecord,
     decryptRecord,
@@ -18,34 +19,12 @@ import {
 import { TlsDecryptError } from "../src/errors.js";
 import type { AeadAlgorithm, CipherSuite } from "../src/types.js";
 
-// Mutable stand-in for the AEAD decrypt primitive. Tests can swap it to simulate
-// a misbehaving crypto backend; the hoisted vi.mock at the top of the file wires
-// it into the @browsercore/crypto module before record.js binds to it. By default
-// it delegates to the real aes128GcmDecrypt so the round-trip tests are unaffected;
-// the defensive-cause test overrides it to throw a non-Error.
-const mockDecrypt = vi.hoisted(() => vi.fn());
-vi.mock("@browsercore/crypto", async (importOriginal) => {
-    const actual = await importOriginal<typeof import("@browsercore/crypto")>();
-    const realAes128GcmDecrypt = actual.crypto.aes128GcmDecrypt.bind(actual.crypto);
-    // `crypto` is a NodeCryptoProvider instance: shallow-spreading it would sever
-    // the prototype chain and drop its methods. Clone it via Object.create so the
-    // prototype (and thus every other method) is preserved, then override the one
-    // primitive we want to control.
-    const cryptoClone = Object.create(
-        Object.getPrototypeOf(actual.crypto),
-        Object.getOwnPropertyDescriptors(actual.crypto),
-    ) as typeof actual.crypto;
-    Object.defineProperty(cryptoClone, "aes128GcmDecrypt", {
-        configurable: true,
-        writable: true,
-        value: (...args: unknown[]) => mockDecrypt(...args),
-    });
-    mockDecrypt.mockImplementation(realAes128GcmDecrypt);
-    return {
-        ...actual,
-        crypto: cryptoClone,
-    };
-});
+/**
+ * node:crypto-backed provider for record-layer round-trip tests. The
+ * defensive-cause test below builds a separate provider whose decrypt
+ * primitive throws a non-Error value.
+ */
+const crypto = createTestCryptoProvider();
 
 /** Key + nonce sizes per AEAD algorithm (bytes). */
 function keyNonceFor(algorithm: AeadAlgorithm): { key: Uint8Array; nonce: Uint8Array } {
@@ -143,25 +122,21 @@ describe("encryptRecord / decryptRecord round-trip", () => {
 describe("decryptRecord defensive cause handling", () => {
     it("wraps a non-Error throw from the AEAD primitive as TlsDecryptError (no cause)", async () => {
         // The catch branch at line 177 handles the case where the AEAD primitive
-        // throws something that is NOT an Error instance. The real @browsercore/crypto
-        // always throws DecryptError, so we simulate a misbehaving backend by
-        // pointing the hoisted mockDecrypt at a function that throws a bare string.
-        // (mockReset in the finally restores the default delegation to the real
-        // primitive, so later test files are unaffected.)
-        mockDecrypt.mockImplementation(() => {
-            throw "corrupt"; // non-Error throw
-        });
-
+        // throws something that is NOT an Error instance. The real
+        // @browsercore/crypto always throws DecryptError, so we simulate a
+        // misbehaving backend with a provider whose decrypt throws a bare string.
         const key = crypto.randomBytes(16);
         const nonce = crypto.randomBytes(12);
         const aad = serializeRecordHeader(22, 16);
-        try {
-            expect(() => decryptRecord(new Uint8Array(16), key, nonce, aad, "AES-128-GCM", crypto)).toThrow(
-                TlsDecryptError,
-            );
-        } finally {
-            mockDecrypt.mockReset();
-        }
+        const badProvider: CryptoProvider = {
+            ...crypto,
+            aes128GcmDecrypt: () => {
+                throw "corrupt"; // non-Error throw
+            },
+        };
+        expect(() => decryptRecord(new Uint8Array(16), key, nonce, aad, "AES-128-GCM", badProvider)).toThrow(
+            TlsDecryptError,
+        );
     });
 });
 

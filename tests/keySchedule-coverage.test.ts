@@ -9,7 +9,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { crypto, SHA_256, SHA_384 } from "@browsercore/crypto";
+import { createTestCryptoProvider } from "./test-helpers.js";
+import { SHA_256, SHA_384 } from "@browsercore/crypto";
+
+const crypto = createTestCryptoProvider();
 import {
     cipherSuiteToHash,
     cipherSuiteKeyLength,

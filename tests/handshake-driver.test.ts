@@ -17,7 +17,9 @@ import { TLS_1_2, TLS_1_3 } from "../src/types.js";
 import type { ClientHelloConfig } from "../src/types.js";
 import { FakeTransport } from "./fake-transport.js";
 import { TlsServerSim } from "./server-sim.js";
-import { createMockEventProvider } from "./test-helpers.js";
+import { createMockEventProvider, createTestCryptoProvider } from "./test-helpers.js";
+
+const crypto = createTestCryptoProvider();
 
 const PROFILE: ClientHelloConfig = {
     cipherSuites: ["TLS_AES_128_GCM_SHA256"],

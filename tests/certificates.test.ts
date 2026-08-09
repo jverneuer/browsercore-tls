@@ -8,7 +8,9 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { crypto } from "@browsercore/crypto";
+import { createTestCryptoProvider } from "./test-helpers.js";
+
+const crypto = createTestCryptoProvider();
 import {
     generateKeyPairSync,
     createSign,

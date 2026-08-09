@@ -10,8 +10,10 @@
  * verify it; only the Finished HMAC is checked).
  */
 
-import { crypto } from "@browsercore/crypto";
+import { createTestCryptoProvider } from "./test-helpers.js";
 import type { X25519Backend } from "@browsercore/crypto";
+
+const crypto = createTestCryptoProvider();
 import { generateKeyPairSync, createSign } from "node:crypto";
 import {
     ContentType,

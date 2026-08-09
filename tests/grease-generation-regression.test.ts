@@ -17,7 +17,9 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { crypto } from "@browsercore/crypto";
+import { createTestCryptoProvider } from "./test-helpers.js";
+
+const crypto = createTestCryptoProvider();
 import { buildClientHello } from "../src/handshake/client-hello.js";
 import { ExtensionType } from "../src/extensions/extensions.js";
 import { TLS_1_3 } from "../src/types.js";
