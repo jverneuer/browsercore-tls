@@ -29,17 +29,23 @@ is `@browsercore/crypto`'s job, which keeps the crypto backend replaceable.
 ## Public API
 
 ```ts
+import { EventEmitter } from "node:events";
 import { connect } from "@browsercore/transport";
 import { connectTls, resolveProfile, TlsHandshakeError } from "@browsercore/tls";
 
 const transport = await connect({ host: "example.com", port: 443 });
 
+// `events` is required — an injected EventProvider backend that decouples the
+// connection from node:events. Any runtime adapter satisfying the EventProvider
+// interface works (here a thin wrapper over Node's EventEmitter).
+const events = new EventEmitter();
 const tls = await connectTls({
     transport,
     serverName: "example.com",
     profile: resolveProfile("modern-tls13", "example.com"),
     alpnProtocols: ["h2", "http/1.1"],
     handshakeTimeoutMs: 10_000,
+    events,
 });
 
 const response = await tls.read();
@@ -70,11 +76,13 @@ await tls.close();
 
 ```
 @browsercore/tls
+  ├─ @browsercore/contracts
   ├─ @browsercore/transport
   └─ @browsercore/crypto
 ```
 
-No other `@browsercore/*` packages are imported. Shared build, lint,
+`@browsercore/contracts` provides the `EventProvider` interface the connection
+composes (dependency injection — no `node:events` import). Shared build, lint,
 and test config comes from `@browsercore/dev` (see [Development](#development)).
 
 ## Architecture

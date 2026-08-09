@@ -9,7 +9,9 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { crypto } from "@browsercore/crypto";
+import { createMockEventProvider, createTestCryptoProvider } from "./test-helpers.js";
+
+const crypto = createTestCryptoProvider();
 import { TlsConnectionImpl } from "../src/tls.js";
 import { ContentType, serializeRecordHeader, encryptRecord } from "../src/record/record.js";
 import { TlsError, TlsHandshakeError } from "../src/errors.js";
@@ -54,6 +56,7 @@ function openConnection(): TlsConnectionImpl {
         serverName: "example.com",
         profile: BASE_PROFILE,
         crypto,
+        events: createMockEventProvider(),
     }, crypto);
     const internals = conn as unknown as Internals;
     internals.applicationSecrets = SECRETS;
@@ -85,6 +88,7 @@ describe("TlsConnectionImpl constructor", () => {
             profile: BASE_PROFILE,
             trustAnchors: [anchor],
             crypto,
+            events: createMockEventProvider(),
         }, crypto);
         expect((conn as unknown as { transport: FakeTransport }).transport).toBe(transport);
     });
@@ -97,6 +101,7 @@ describe("TlsConnectionImpl constructor", () => {
             profile: BASE_PROFILE,
             alpnProtocols: ["h2"],
             crypto,
+            events: createMockEventProvider(),
         }, crypto);
         // The override lands on the internal profile; alpnProtocol surfaces once
         // the handshake completes. Here we confirm the constructor did not crash
@@ -112,6 +117,7 @@ describe("TlsConnectionImpl constructor", () => {
             profile: { ...BASE_PROFILE, alpnProtocols: ["http/1.1"] },
             alpnProtocols: [],
             crypto,
+            events: createMockEventProvider(),
         }, crypto);
         expect(conn.state.state).toBe("connecting");
     });
@@ -123,6 +129,7 @@ describe("TlsConnectionImpl constructor", () => {
             serverName: "example.com",
             profile: BASE_PROFILE,
             crypto,
+            events: createMockEventProvider(),
         }, crypto);
         // No crash; the connection is usable without anchors.
         expect(conn.state.state).toBe("connecting");
@@ -136,6 +143,7 @@ describe("write", () => {
             serverName: "example.com",
             profile: BASE_PROFILE,
             crypto,
+            events: createMockEventProvider(),
         }, crypto);
         // ensureOpen throws TlsHandshakeError; write() wraps it via ensureTlsError
         // so callers see a uniform TlsError.
@@ -192,6 +200,7 @@ describe("read", () => {
             serverName: "example.com",
             profile: BASE_PROFILE,
             crypto,
+            events: createMockEventProvider(),
         }, crypto);
         await expect(conn.read()).rejects.toThrow(TlsHandshakeError);
     });
@@ -308,6 +317,7 @@ describe("close", () => {
             serverName: "example.com",
             profile: BASE_PROFILE,
             crypto,
+            events: createMockEventProvider(),
         }, crypto);
         const transport = (conn as unknown as { transport: FakeTransport }).transport;
         // state is "connecting" (not "open"), so no alert is sent.
@@ -329,13 +339,25 @@ describe("handshake", () => {
 
 describe("on", () => {
     it("registers a close listener and returns the connection for chaining", () => {
-        const conn = new TlsConnectionImpl(undefined, crypto);
+        const conn = new TlsConnectionImpl({
+            transport: new FakeTransport(),
+            serverName: "example.com",
+            profile: BASE_PROFILE,
+            crypto,
+            events: createMockEventProvider(),
+        }, crypto);
         const result = conn.on("close", () => {});
         expect(result).toBe(conn);
     });
 
     it("registers an error listener", () => {
-        const conn = new TlsConnectionImpl(undefined, crypto);
+        const conn = new TlsConnectionImpl({
+            transport: new FakeTransport(),
+            serverName: "example.com",
+            profile: BASE_PROFILE,
+            crypto,
+            events: createMockEventProvider(),
+        }, crypto);
         const result = conn.on("error", () => {});
         expect(result).toBe(conn);
     });

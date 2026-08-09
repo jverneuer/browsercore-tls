@@ -6,6 +6,7 @@
  * but NEVER imports node:crypto directly — that boundary is @browsercore/crypto's job.
  */
 
+import type { EventProvider } from "@browsercore/contracts";
 import type { CryptoProvider } from "@browsercore/crypto";
 import type { Transport } from "@browsercore/transport";
 import type { TlsError } from "./errors.js";
@@ -214,6 +215,15 @@ export interface TlsOptions {
      * or a custom/fake provider for testing or to swap the backend (WebCrypto, HSM).
      */
     readonly crypto: CryptoProvider;
+    /**
+     * Event provider backend. REQUIRED — pure dependency injection, no fallback.
+     * Decouples the connection from node:events so the backend is swappable
+     * (Node EventEmitter, EventTarget, mock). The connection delegates its
+     * lifecycle events ("close", "error") to this provider.
+     *
+     * Inject the runtime EventProvider via the composition root (browsersmith).
+     */
+    readonly events: EventProvider;
 }
 
 /**
@@ -247,8 +257,13 @@ export interface ApplicationData {
     readonly payload: Uint8Array;
 }
 
-/** The public interface for an established TLS connection. */
-export interface TlsConnection {
+/**
+ * The public interface for an established TLS connection.
+ *
+ * Extends {@link EventProvider} so the connection is observable through the
+ * same injected backend it composes — no inheritance from node:events.
+ */
+export interface TlsConnection extends EventProvider {
     /** Opaque session identifier for logging / correlation. */
     readonly id: TlsSessionId;
     /** Current lifecycle state. */

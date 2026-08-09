@@ -7,7 +7,9 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { crypto } from "@browsercore/crypto";
+import { createTestCryptoProvider } from "./test-helpers.js";
+
+const crypto = createTestCryptoProvider();
 import {
     ContentType,
     parseRecordHeader,
@@ -321,7 +323,6 @@ describe("mock handshake derives application traffic keys", () => {
         // A representative transcript: ClientHello || ServerHello || ... || CertificateVerify.
         // The key schedule only cares that the transcript is a hash-length blob; we
         // use the crypto backend's sha256 over canned handshake messages.
-        const { crypto } = await import("@browsercore/crypto");
         const clientHello = buildClientHello(
             {
                 cipherSuites: [cipherSuite],

@@ -10,7 +10,9 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { crypto } from "@browsercore/crypto";
+import { createTestCryptoProvider } from "./test-helpers.js";
+
+const crypto = createTestCryptoProvider();
 import { readEncryptedHandshakeMessage } from "../src/connection/handshake-messages.js";
 import { xorNonce } from "../src/connection/record-layer.js";
 import { ContentType, encryptRecord, serializeRecordHeader } from "../src/record/record.js";

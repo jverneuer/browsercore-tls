@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { crypto, defaultX25519Backend } from "@browsercore/crypto";
+import { NobleX25519Backend } from "@browsercore/crypto";
 import { connectTls } from "../src/tls.js";
 import { TlsHandshakeError } from "../src/errors.js";
 import { ContentType } from "../src/record/record.js";
@@ -17,6 +17,9 @@ import { TLS_1_2, TLS_1_3 } from "../src/types.js";
 import type { ClientHelloConfig } from "../src/types.js";
 import { FakeTransport } from "./fake-transport.js";
 import { TlsServerSim } from "./server-sim.js";
+import { createMockEventProvider, createTestCryptoProvider } from "./test-helpers.js";
+
+const crypto = createTestCryptoProvider();
 
 const PROFILE: ClientHelloConfig = {
     cipherSuites: ["TLS_AES_128_GCM_SHA256"],
@@ -66,6 +69,7 @@ describe("connectTls full handshake (runHandshake)", () => {
             crypto,
             serverName: "example.com",
             profile: PROFILE,
+            events: createMockEventProvider(),
         });
         expect(conn.state.state).toBe("open");
         expect(conn.cipherSuite).toBe("TLS_AES_128_GCM_SHA256");
@@ -84,13 +88,14 @@ describe("connectTls full handshake (runHandshake)", () => {
         // hides X25519 regressions. Injecting an independent backend breaks
         // that: if the client's X25519 drifts from the noble backend's, the
         // derived traffic secrets diverge and the Finished verify fails.
-        const sim = new TlsServerSim({ x25519Backend: defaultX25519Backend });
+        const sim = new TlsServerSim({ x25519Backend: new NobleX25519Backend() });
         const transport = new HandshakeTransport(sim);
         const conn = await connectTls({
             transport,
             crypto,
             serverName: "example.com",
             profile: PROFILE,
+            events: createMockEventProvider(),
         });
         expect(conn.state.state).toBe("open");
         expect(conn.cipherSuite).toBe("TLS_AES_128_GCM_SHA256");
@@ -105,6 +110,7 @@ describe("connectTls full handshake (runHandshake)", () => {
             crypto,
             serverName: "example.com",
             profile: { ...PROFILE, alpnProtocols: ["h2", "http/1.1"] },
+            events: createMockEventProvider(),
         });
         expect(conn.alpnProtocol).toBe("h2");
     });
@@ -117,6 +123,7 @@ describe("connectTls full handshake (runHandshake)", () => {
             crypto,
             serverName: "example.com",
             profile: PROFILE,
+            events: createMockEventProvider(),
         });
         expect(conn.alpnProtocol).toBeUndefined();
     });
@@ -130,6 +137,7 @@ describe("connectTls full handshake (runHandshake)", () => {
                 crypto,
                 serverName: "example.com",
                 profile: { ...PROFILE, supportedVersions: [TLS_1_2] },
+                events: createMockEventProvider(),
             }),
         ).rejects.toThrow(TlsHandshakeError);
         // No ClientHello was written — the profile check fires first.
@@ -145,6 +153,7 @@ describe("connectTls full handshake (runHandshake)", () => {
                 crypto,
                 serverName: "example.com",
                 profile: { ...PROFILE, keyShareGroups: ["secp256r1"] },
+                events: createMockEventProvider(),
             }),
         ).rejects.toThrow(TlsHandshakeError);
         try {
@@ -152,6 +161,7 @@ describe("connectTls full handshake (runHandshake)", () => {
                 transport: new HandshakeTransport(new TlsServerSim()),
                 serverName: "example.com",
                 profile: { ...PROFILE, keyShareGroups: ["secp256r1"] },
+                events: createMockEventProvider(),
             });
         } catch (e) {
             expect((e as TlsHandshakeError).cause?.message).toMatch(/no supported key share groups/);
@@ -172,7 +182,7 @@ describe("connectTls full handshake (runHandshake)", () => {
             sim.responses[0] = new Uint8Array([ContentType.APPLICATION_DATA, ...sh.subarray(1)]);
         };
         await expect(
-            connectTls({ transport, serverName: "example.com", profile: PROFILE, crypto }),
+            connectTls({ transport, serverName: "example.com", profile: PROFILE, crypto, events: createMockEventProvider() }),
         ).rejects.toThrow(TlsHandshakeError);
     });
 
@@ -188,7 +198,7 @@ describe("connectTls full handshake (runHandshake)", () => {
             finished[finished.length - 1] ^= 0xff;
         };
         await expect(
-            connectTls({ transport, serverName: "example.com", profile: PROFILE, crypto }),
+            connectTls({ transport, serverName: "example.com", profile: PROFILE, crypto, events: createMockEventProvider() }),
         ).rejects.toThrow();
     });
 
@@ -200,6 +210,7 @@ describe("connectTls full handshake (runHandshake)", () => {
             crypto,
             serverName: "example.com",
             profile: PROFILE,
+            events: createMockEventProvider(),
         });
         expect(conn.peerCertificate).toBeDefined();
         expect(conn.peerCertificate!.commonName).toBe("example.com");

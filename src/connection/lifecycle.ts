@@ -8,8 +8,8 @@
  * this plumbing.
  */
 
-import { systemClock, type Clock, type CloseReason, type TlsState } from "../types.js";
-import { TlsAlertError, TlsHandshakeError, type TlsError } from "../errors.js";
+import { systemClock, type Clock, type TlsState } from "../types.js";
+import { TlsAlertError, TlsHandshakeError } from "../errors.js";
 import { ContentType } from "../record/record.js";
 import { assertNever } from "../utils.js";
 
@@ -80,19 +80,5 @@ export function ensureOpen(state: TlsState): void {
         throw new TlsHandshakeError("finished", {
             cause: new Error(`connection not open (state: ${state.state})`),
         });
-    }
-}
-
-/** Emit an error to all registered error listeners. */
-export function emitError(listeners: readonly ((error: TlsError) => void)[], error: TlsError): void {
-    for (const listener of listeners) {
-        listener(error);
-    }
-}
-
-/** Notify all close listeners. */
-export function notifyClose(listeners: readonly ((reason: CloseReason) => void)[], reason: CloseReason): void {
-    for (const listener of listeners) {
-        listener(reason);
     }
 }
