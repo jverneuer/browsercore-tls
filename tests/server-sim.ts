@@ -77,6 +77,14 @@ export interface ServerOptions {
     /** Cipher suite wire value to negotiate (default 0x1301 = AES-128-GCM). */
     cipherWire?: number;
     /**
+     * How to pack the server's encrypted flight into records.
+     * - "separate" (default): one handshake message per record (the simple case).
+     * - "coalesced": all four messages (EE + Cert + CV + Finished) in a single
+     *   record — the common real-world pattern that caused the finished-phase stall.
+     * - "partial": two messages per record (EE+Cert, then CV+Finished).
+     */
+    recordPacking?: "separate" | "coalesced" | "partial";
+    /**
      * X25519 backend for the server-side shared secret. When set, the server
      * uses this independent backend rather than the shared `crypto` provider
      * the client drives — breaking the circular masking where both sides call
@@ -325,12 +333,27 @@ export class TlsServerSim {
         const transcriptBeforeFinished = [clientHelloMsg, serverHelloMsg, ee, cert, cv];
         const fin = this.buildFinishedMessage(serverTrafficSecret, transcriptBeforeFinished);
 
-        // Encrypt each message as a separate record under the server handshake key.
-        const encrypted: Uint8Array[] = [];
-        let seq = 0;
-        for (const msg of [ee, cert, cv, fin]) {
-            encrypted.push(this.encryptHandshakeRecord(msg, serverHsTraffic, seq));
-            seq++;
+        // Encrypt the server flight under the server handshake key. RFC 8446
+        // §5.1 permits coalescing multiple handshake messages into a single
+        // record; real servers (Cloudflare, nginx, OpenSSL) commonly do so.
+        const packing = this.opts.recordPacking ?? "separate";
+        let encrypted: Uint8Array[];
+        if (packing === "coalesced") {
+            encrypted = [
+                this.encryptHandshakeRecord(concatBytes(ee, cert, cv, fin), serverHsTraffic, 0),
+            ];
+        } else if (packing === "partial") {
+            encrypted = [
+                this.encryptHandshakeRecord(concatBytes(ee, cert), serverHsTraffic, 0),
+                this.encryptHandshakeRecord(concatBytes(cv, fin), serverHsTraffic, 1),
+            ];
+        } else {
+            encrypted = [];
+            let seq = 0;
+            for (const msg of [ee, cert, cv, fin]) {
+                encrypted.push(this.encryptHandshakeRecord(msg, serverHsTraffic, seq));
+                seq++;
+            }
         }
 
         this.responses = [shRecord, ...encrypted];

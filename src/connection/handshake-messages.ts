@@ -146,9 +146,58 @@ export function buildClientFinishedMessage(
 }
 
 /**
+ * Split a decrypted record's content into individual handshake messages.
+ *
+ * RFC 8446 §5.1 permits a server to coalesce multiple handshake messages into a
+ * single TLSCiphertext record. Each message is framed as type(1) || length(3)
+ * || body (24-bit length in bytes 1..3), so the content can be split
+ * deterministically by walking the framing.
+ *
+ * When the content holds exactly one message (the non-coalesced case), this
+ * returns a single-element array containing the original content unchanged.
+ *
+ * @param content  The full decrypted record content (inner content type byte
+ *                 and trailing zero-padding already stripped by the caller).
+ */
+export function splitHandshakeMessages(content: Uint8Array): Uint8Array[] {
+    const messages: Uint8Array[] = [];
+    let offset = 0;
+    while (offset < content.length) {
+        if (offset + 4 > content.length) {
+            throw new TlsHandshakeError("finished", {
+                cause: new Error("truncated handshake message header in coalesced record"),
+            });
+        }
+        // 24-bit body length in bytes 1..3 (byte 0 is the handshake type).
+        const b1 = content[offset + 1];
+        const b2 = content[offset + 2];
+        const b3 = content[offset + 3];
+        if (b1 === undefined || b2 === undefined || b3 === undefined) {
+            throw new TlsHandshakeError("finished", {
+                cause: new Error("truncated handshake message header in coalesced record"),
+            });
+        }
+        const bodyLen = (b1 << 16) | (b2 << 8) | b3;
+        const totalLen = 4 + bodyLen;
+        if (offset + totalLen > content.length) {
+            throw new TlsHandshakeError("finished", {
+                cause: new Error("handshake message body exceeds record content boundary"),
+            });
+        }
+        messages.push(content.subarray(offset, offset + totalLen));
+        offset += totalLen;
+    }
+    return messages;
+}
+
+/**
  * Read one encrypted handshake message, decrypting and stripping the inner type.
  * Returns the whole handshake message (header + body), the body alone, and the
  * buffer left after consuming the record.
+ *
+ * When the record contains multiple coalesced handshake messages (RFC 8446
+ * §5.1), `whole` holds the concatenation of all messages and the caller must
+ * use {@link splitHandshakeMessages} to separate them.
  */
 export async function readEncryptedHandshakeMessage(
     readBuffer: Uint8Array,

@@ -215,4 +215,62 @@ describe("connectTls full handshake (runHandshake)", () => {
         expect(conn.peerCertificate).toBeDefined();
         expect(conn.peerCertificate!.commonName).toBe("example.com");
     });
+
+    // -----------------------------------------------------------------------
+    // Coalesced-record regression tests (RFC 8446 §5.1).
+    //
+    // Real TLS 1.3 servers (Cloudflare, nginx, OpenSSL) commonly pack multiple
+    // handshake messages into a single encrypted record. The original driver
+    // assumed one message per record, so the second call to readEncryptedHandshakeMessage
+    // would block on transport.read() waiting for data the server had already sent —
+    // causing the 10s timeout at the finished phase.
+    // -----------------------------------------------------------------------
+
+    it("completes the handshake when the server coalesces all flight messages into one record", async () => {
+        const sim = new TlsServerSim({ recordPacking: "coalesced" });
+        const transport = new HandshakeTransport(sim);
+        const conn = await connectTls({
+            transport,
+            crypto,
+            serverName: "example.com",
+            profile: PROFILE,
+            events: createMockEventProvider(),
+        });
+        expect(conn.state.state).toBe("open");
+        expect(conn.cipherSuite).toBe("TLS_AES_128_GCM_SHA256");
+        expect(conn.peerCertificate).toBeDefined();
+        expect(conn.peerCertificate!.commonName).toBe("example.com");
+    });
+
+    it("completes the handshake when the server partially coalesces (two messages per record)", async () => {
+        const sim = new TlsServerSim({ recordPacking: "partial" });
+        const transport = new HandshakeTransport(sim);
+        const conn = await connectTls({
+            transport,
+            crypto,
+            serverName: "example.com",
+            profile: PROFILE,
+            events: createMockEventProvider(),
+        });
+        expect(conn.state.state).toBe("open");
+        expect(conn.cipherSuite).toBe("TLS_AES_128_GCM_SHA256");
+    });
+
+    it("completes a coalesced handshake with ALPN and injected X25519 backend", async () => {
+        const sim = new TlsServerSim({
+            recordPacking: "coalesced",
+            alpn: "h2",
+            x25519Backend: new NobleX25519Backend(),
+        });
+        const transport = new HandshakeTransport(sim);
+        const conn = await connectTls({
+            transport,
+            crypto,
+            serverName: "example.com",
+            profile: { ...PROFILE, alpnProtocols: ["h2", "http/1.1"] },
+            events: createMockEventProvider(),
+        });
+        expect(conn.state.state).toBe("open");
+        expect(conn.alpnProtocol).toBe("h2");
+    });
 });
