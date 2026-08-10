@@ -14,6 +14,9 @@
 
 import { describe, it, expect } from "vitest";
 import { connect } from "@browsercore/transport";
+import type { Net, DnsResolver, Socket, ConnectOptions, IPAddress } from "@browsercore/contracts";
+import { connect as netConnect } from "node:net";
+import { lookup as dnsLookup } from "node:dns";
 import { createMockEventProvider, createTestCryptoProvider } from "./test-helpers.js";
 
 const crypto = createTestCryptoProvider();
@@ -22,6 +25,35 @@ import { TLS_1_3 } from "../src/types.js";
 import type { ClientHelloConfig } from "../src/types.js";
 
 const RUN_LIVE_TESTS = process.env.RUN_LIVE_TESTS === "1";
+
+/** Real Node.js Net adapter backed by node:net for live TCP connections. */
+const nodeNet: Net = {
+    connect(options: ConnectOptions): Socket {
+        return netConnect({
+            host: options.host,
+            port: options.port,
+            noDelay: options.noDelay,
+            localAddress: options.localAddress,
+            family: options.family,
+        }) as unknown as Socket;
+    },
+};
+
+/** Real Node.js DnsResolver backed by node:dns.lookup. */
+const nodeDns: DnsResolver = {
+    lookup(hostname, family) {
+        return new Promise((resolve, reject) => {
+            dnsLookup(hostname, { family }, (err, address, resolvedFamily) => {
+                if (err) {
+                    reject(err);
+                    return;
+                }
+                const result: IPAddress = { address, family: (resolvedFamily ?? family) as 4 | 6 };
+                resolve([result]);
+            });
+        });
+    },
+};
 
 /**
  * A minimal TLS 1.3 ClientHello profile offering X25519 key share.
@@ -48,10 +80,14 @@ const PROFILE: ClientHelloConfig = {
             host: "example.com",
             port: 443,
             connectTimeoutMs: 15_000,
+            net: nodeNet,
+            dns: nodeDns,
+            events: createMockEventProvider(),
         });
 
         try {
             // Drive the full TLS 1.3 handshake over the live transport.
+            // onDebug traces every I/O + crypto step so we can pinpoint stalls.
             const conn = await connectTls({
                 transport,
                 crypto,
@@ -59,6 +95,7 @@ const PROFILE: ClientHelloConfig = {
                 profile: PROFILE,
                 handshakeTimeoutMs: 25_000,
                 events: createMockEventProvider(),
+                onDebug: (msg: string) => console.error(`[tls-debug] ${msg}`),
             });
 
             // The handshake reached the "open" state — ServerHello was received,

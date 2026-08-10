@@ -59,14 +59,21 @@ export function xorNonce(iv: Uint8Array, seq: number): Uint8Array {
 }
 
 /** Pull bytes from the transport until at least `n` are buffered. Returns the new buffer. */
-export async function ensureBytes(readBuffer: Uint8Array, transport: Transport, n: number): Promise<Uint8Array> {
+export async function ensureBytes(
+    readBuffer: Uint8Array,
+    transport: Transport,
+    n: number,
+    onDebug?: (msg: string) => void,
+): Promise<Uint8Array> {
     let buffer = readBuffer;
     while (buffer.length < n) {
         // Sequential by necessity: each transport.read() delivers a variable
         // number of bytes and the loop continuation (buffer.length < n) must be
         // re-evaluated after every read, so the reads cannot be parallelized.
+        onDebug?.(`ensureBytes: need ${n} bytes, have ${buffer.length}, calling transport.read()`);
         // eslint-disable-next-line no-await-in-loop
         const chunk = await transport.read();
+        onDebug?.(`ensureBytes: transport.read() returned ${chunk.length} bytes (now ${buffer.length + chunk.length}/${n})`);
         buffer = concat(buffer, chunk);
     }
     return buffer;
@@ -79,8 +86,9 @@ export async function ensureBytes(readBuffer: Uint8Array, transport: Transport, 
 export async function readHeaderBytes(
     readBuffer: Uint8Array,
     transport: Transport,
+    onDebug?: (msg: string) => void,
 ): Promise<{ raw: Uint8Array; length: number; readBuffer: Uint8Array }> {
-    const buffer = await ensureBytes(readBuffer, transport, 5);
+    const buffer = await ensureBytes(readBuffer, transport, 5, onDebug);
     const raw = buffer.subarray(0, 5);
     const parsed = parseRecordHeader(raw);
     return { raw, length: parsed.length, readBuffer: buffer };
@@ -91,8 +99,9 @@ export async function readRawRecord(
     readBuffer: Uint8Array,
     transport: Transport,
     header: { raw: Uint8Array; length: number },
+    onDebug?: (msg: string) => void,
 ): Promise<{ type: ContentType; fragment: Uint8Array; readBuffer: Uint8Array }> {
-    const buffer = await ensureBytes(readBuffer, transport, 5 + header.length);
+    const buffer = await ensureBytes(readBuffer, transport, 5 + header.length, onDebug);
     // type is byte 0 of the header; validate it back to the union (the cast that
     // used to live here is replaced by a properly-typed parse step).
     const typeByte = header.raw[0];
@@ -100,6 +109,7 @@ export async function readRawRecord(
         throw new TlsDecryptError("record", { cause: new Error("record header missing content type byte") });
     }
     const type = readContentType(typeByte);
+    onDebug?.(`record read: content_type=${typeByte} (0x${typeByte.toString(16).padStart(2, "0")}), fragment_length=${header.length}`);
     const fragment = buffer.subarray(5, 5 + header.length);
     return { type, fragment, readBuffer: buffer.subarray(5 + header.length) };
 }
@@ -116,29 +126,32 @@ export async function readEncryptedRecord(
     traffic: TrafficSecrets,
     seq: number,
     provider: CryptoProvider,
+    onDebug?: (msg: string) => void,
 ): Promise<{ innerType: ContentType; content: Uint8Array; readBuffer: Uint8Array }> {
-    const header = await readHeaderBytes(readBuffer, transport);
-    const record = await readRawRecord(header.readBuffer, transport, header);
+    const header = await readHeaderBytes(readBuffer, transport, onDebug);
+    const record = await readRawRecord(header.readBuffer, transport, header, onDebug);
     if (record.type !== ContentType.APPLICATION_DATA) {
-        throw new TlsHandshakeError("finished", {
+        throw new TlsHandshakeError("application", {
             cause: new Error(`expected encrypted APPLICATION_DATA record, got ${record.type}`),
         });
     }
     const nonce = xorNonce(traffic.iv, seq);
-    const plaintext = decryptRecord(record.fragment, traffic.key, nonce, header.raw, aead, provider)
+    onDebug?.(`AEAD decrypt: algorithm=${aead}, seq=${seq}, ciphertext_len=${record.fragment.length}`);
+    const plaintext = decryptRecord(record.fragment, traffic.key, nonce, header.raw, aead, provider);
+    onDebug?.(`AEAD decrypt: success, plaintext_len=${plaintext.length}`);
     // plaintext = content || innerType || optional zero padding. Find the type.
     let end = plaintext.length;
     while (end > 0 && plaintext[end - 1] === 0) {
         end--;
     }
     if (end === 0) {
-        throw new TlsHandshakeError("finished", {
+        throw new TlsHandshakeError("application", {
             cause: new Error("encrypted record plaintext is all zero padding"),
         });
     }
     const innerTypeByte = plaintext[end - 1];
     if (innerTypeByte === undefined) {
-        throw new TlsHandshakeError("finished", {
+        throw new TlsHandshakeError("application", {
             cause: new Error("encrypted record plaintext ended before the inner content type byte"),
         });
     }
@@ -164,10 +177,13 @@ export async function writeEncryptedRecord(
     content: Uint8Array,
     seq: number,
     provider: CryptoProvider,
+    onDebug?: (msg: string) => void,
 ): Promise<void> {
     const plaintext = concat(content, new Uint8Array([innerType]));
     const header = serializeRecordHeader(ContentType.APPLICATION_DATA, plaintext.length + AEAD_TAG_LENGTH);
     const nonce = xorNonce(traffic.iv, seq);
+    onDebug?.(`AEAD encrypt: algorithm=${aead}, seq=${seq}, inner_type=${innerType}, plaintext_len=${plaintext.length}`);
     const ciphertext = encryptRecord(plaintext, traffic.key, nonce, header, aead, provider);
+    onDebug?.(`AEAD encrypt: success, ciphertext_len=${ciphertext.length}`);
     await transport.write(concat(header, ciphertext));
 }

@@ -5,9 +5,9 @@
  * runHandshake to completion: parse the ClientHello's key share, build a
  * ServerHello + encrypted flight (EncryptedExtensions, Certificate,
  * CertificateVerify, Finished), and encrypt each under the server handshake
- * traffic key. Everything is real crypto — the only shortcut is that
- * CertificateVerify carries a dummy signature (the client driver does not
- * verify it; only the Finished HMAC is checked).
+ * traffic key. Everything is real crypto — CertificateVerify now carries a
+ * genuine ECDSA P-256 signature over the transcript hash, so the client's
+ * {@link verifyCertificateVerify} check is fully exercised end-to-end.
  */
 
 import { createTestCryptoProvider } from "./test-helpers.js";
@@ -21,7 +21,7 @@ import {
     encryptRecord,
 } from "../src/record/record.js";
 import { ExtensionType, namedGroupToWire, parseExtensions, findExtension } from "../src/extensions/extensions.js";
-import { HandshakeType } from "../src/handshake/handshake.js";
+import { HandshakeType, HELLO_RETRY_REQUEST_RANDOM, buildMessageHashMessage } from "../src/handshake/handshake.js";
 import {
     deriveHandshakeTrafficSecrets,
     deriveTrafficSecrets,
@@ -85,31 +85,74 @@ export interface ServerOptions {
      */
     recordPacking?: "separate" | "coalesced" | "partial";
     /**
+     * Whether to insert a ChangeCipherSpec (CCS) record between the ServerHello
+     * and the encrypted flight, per RFC 8446 §5 middlebox-compatibility mode.
+     * Real TLS 1.3 servers (example.com, Cloudflare, nginx) send this dummy CCS
+     * record; the client MUST silently ignore it. Default false (sim only).
+     */
+    sendCcs?: boolean;
+    /**
      * X25519 backend for the server-side shared secret. When set, the server
      * uses this independent backend rather than the shared `crypto` provider
      * the client drives — breaking the circular masking where both sides call
      * the same (potentially buggy) implementation.
      */
     x25519Backend?: X25519Backend;
+    /**
+     * When true, the server sim corrupts the CertificateVerify signature before
+     * encryption so the client's {@link verifyCertificateVerify} rejects with a
+     * signature mismatch. The corruption is in the plaintext (not the
+     * ciphertext), so AEAD decryption still succeeds and the signature check is
+     * actually exercised.
+     */
+    tamperCertificateVerify?: boolean;
+    /**
+     * When set, the server sends a HelloRetryRequest (RFC 8446 §4.1.3) instead
+     * of a ServerHello in response to the first ClientHello. The client must
+     * rewrite the transcript with a synthetic message_hash, generate a fresh key
+     * share for the requested group, echo the cookie, and resend the ClientHello.
+     * The real ServerHello + encrypted flight is sent in response to the second
+     * ClientHello.
+     */
+    helloRetryRequest?: {
+        /** The selected_group to request in the HRR key_share extension. */
+        selectedGroup?: import("../src/types.js").NamedGroup;
+        /** Optional cookie to include in the HRR (RFC 8446 §4.2.2). */
+        cookie?: Uint8Array;
+    };
 }
 
 export class TlsServerSim {
     private serverKeys = crypto.x25519GenerateKeyPair();
     private leafDer: Uint8Array;
+    /** PEM-encoded ECDSA P-256 private key matching the leaf certificate. */
+    private leafPrivateKeyPem: string;
     public responses: Uint8Array[] = [];
     private clientKeySharePub: Uint8Array | undefined;
     private clientHelloMsg: Uint8Array | undefined;
     private readonly opts: ServerOptions;
     private readonly x25519Backend: X25519Backend | undefined;
+    /** True after the sim sent an HRR; the next ClientHello gets the real flight. */
+    private hrrSent = false;
+    /** Stored ClientHello_1 bytes for transcript computation after HRR. */
+    private clientHello1Msg: Uint8Array | undefined;
+    /** Cached HRR handshake message bytes for transcript consistency. */
+    private hrrMsg: Uint8Array | undefined;
 
     constructor(opts: ServerOptions = {}) {
         this.opts = opts;
         this.x25519Backend = opts.x25519Backend;
-        this.leafDer = this.makeSelfSignedCert("example.com");
+        const { der, privateKeyPem } = this.makeSelfSignedCert("example.com");
+        this.leafDer = der;
+        this.leafPrivateKeyPem = privateKeyPem;
     }
 
-    /** Build a self-signed ECDSA P-256 certificate DER for the given CN. */
-    private makeSelfSignedCert(commonName: string): Uint8Array {
+    /**
+     * Build a self-signed ECDSA P-256 certificate DER for the given CN.
+     * Returns both the DER certificate and the PEM private key so the sim can
+     * generate real CertificateVerify signatures with the same key.
+     */
+    private makeSelfSignedCert(commonName: string): { der: Uint8Array; privateKeyPem: string } {
         const { publicKey, privateKey } = generateKeyPairSync("ec", {
             namedCurve: "P-256",
             publicKeyEncoding: { type: "spki", format: "der" },
@@ -125,7 +168,10 @@ export class TlsServerSim {
         const signer = createSign("SHA256");
         signer.update(Buffer.from(tbs));
         const signature = new Uint8Array(signer.sign({ key: privateKey, dsaEncoding: "der" }));
-        return derSequence(concatBytes(tbs, sigAlg, derBitString(signature)));
+        return {
+            der: derSequence(concatBytes(tbs, sigAlg, derBitString(signature))),
+            privateKeyPem: privateKey,
+        };
     }
 
     /** Extract the client's X25519 public key from a ClientHello handshake message. */
@@ -158,6 +204,53 @@ export class TlsServerSim {
             s += 4 + keyLen;
         }
         throw new Error("ClientHello key_share has no X25519 (0x001d) entry");
+    }
+
+    /**
+     * Build a HelloRetryRequest message (RFC 8446 §4.1.3). Syntactically a
+     * ServerHello with the sentinel random value. Its key_share extension
+     * carries only the selected_group (2 bytes, no key data). An optional cookie
+     * extension may be included.
+     */
+    private buildHelloRetryRequestMessage(): Uint8Array {
+        const random = HELLO_RETRY_REQUEST_RANDOM;
+        const cipherWire = this.opts.cipherWire ?? 0x1301;
+
+        // supported_versions extension.
+        const svData = new Uint8Array([0x03, 0x04]);
+        const svExt = this.extension(ExtensionType.SUPPORTED_VERSIONS, svData);
+
+        // key_share extension: just selected_group (2 bytes).
+        const selectedGroup = this.opts.helloRetryRequest?.selectedGroup ?? "x25519";
+        const gw = namedGroupToWire(selectedGroup);
+        const ksData = new Uint8Array([(gw >> 8) & 0xff, gw & 0xff]);
+        const ksExt = this.extension(ExtensionType.KEY_SHARE, ksData);
+
+        // cookie extension (optional).
+        const parts: Uint8Array[] = [svExt, ksExt];
+        const hrrCookie = this.opts.helloRetryRequest?.cookie;
+        if (hrrCookie !== undefined) {
+            const cookieData = new Uint8Array(2 + hrrCookie.length);
+            cookieData[0] = (hrrCookie.length >> 8) & 0xff;
+            cookieData[1] = hrrCookie.length & 0xff;
+            cookieData.set(hrrCookie, 2);
+            parts.push(this.extension(ExtensionType.COOKIE, cookieData));
+        }
+        const extBytes = concatBytes(...parts);
+
+        const body = new Uint8Array(2 + 32 + 1 + 2 + 1 + 2 + extBytes.length);
+        let o = 0;
+        body[o++] = 0x03; body[o++] = 0x03; // legacy_version
+        body.set(random, o); o += 32;
+        body[o++] = 0; // session_id_len
+        body[o++] = (cipherWire >> 8) & 0xff;
+        body[o++] = cipherWire & 0xff;
+        body[o++] = 0; // compression
+        body[o++] = (extBytes.length >> 8) & 0xff;
+        body[o++] = extBytes.length & 0xff;
+        body.set(extBytes, o);
+
+        return this.handshakeMessage(HandshakeType.SERVER_HELLO, body);
     }
 
     /** Build the ServerHello handshake message (type + length + body). */
@@ -237,15 +330,50 @@ export class TlsServerSim {
         return this.handshakeMessage(HandshakeType.CERTIFICATE, body);
     }
 
-    /** Build a CertificateVerify with a dummy signature (not verified by client). */
-    private buildCertificateVerifyMessage(): Uint8Array {
+    /**
+     * Build a CertificateVerify with a REAL ECDSA P-256 signature over the
+     * signed content defined in RFC 8446 §4.4.3:
+     * 64 * 0x20 || "TLS 1.3, server CertificateVerify" || 0x00 || Hash(transcript)
+     *
+     * The transcript covers ClientHello..Certificate (everything before the
+     * CertificateVerify message itself). When the `tamperCertificateVerify`
+     * option is set, a byte of the signature is corrupted so the client's
+     * verification rejects it — testing the signature check path.
+     */
+    private buildCertificateVerifyMessage(
+        transcriptBeforeCertVerify: readonly Uint8Array[],
+    ): Uint8Array {
+        // Construct the signed content per RFC 8446 §4.4.3.
+        const hash = "SHA-256" as const;
+        const transcriptHashValue = transcriptHash(transcriptBeforeCertVerify, hash, crypto);
+        const context = new TextEncoder().encode("TLS 1.3, server CertificateVerify");
+        const signedContent = concatBytes(
+            new Uint8Array(64).fill(0x20),
+            context,
+            new Uint8Array([0x00]),
+            transcriptHashValue,
+        );
+
+        // Sign with the leaf cert's ECDSA P-256 private key (real crypto).
+        const signer = createSign("SHA256");
+        signer.update(Buffer.from(signedContent));
+        const signature = new Uint8Array(
+            signer.sign({ key: this.leafPrivateKeyPem, dsaEncoding: "der" }),
+        );
+
+        // Optionally corrupt the signature so the client's verification fails.
+        // The corruption is in the plaintext (before AEAD encryption), so
+        // decryption still succeeds and the signature check is actually hit.
+        if (this.opts.tamperCertificateVerify) {
+            signature[signature.length - 1] ^= 0xff;
+        }
+
         // signature_scheme(2) = ecdsa_secp256r1_sha256 (0x0403) + sig_len(2) + sig.
-        const sig = new Uint8Array(64).fill(0xee);
-        const body = new Uint8Array(2 + 2 + sig.length);
+        const body = new Uint8Array(2 + 2 + signature.length);
         body[0] = 0x04; body[1] = 0x03;
-        body[2] = (sig.length >> 8) & 0xff;
-        body[3] = sig.length & 0xff;
-        body.set(sig, 4);
+        body[2] = (signature.length >> 8) & 0xff;
+        body[3] = signature.length & 0xff;
+        body.set(signature, 4);
         return this.handshakeMessage(HandshakeType.CERTIFICATE_VERIFY, body);
     }
 
@@ -300,11 +428,29 @@ export class TlsServerSim {
      * Process a ClientHello record (5-byte header + handshake message) written
      * by the client. Builds the full server flight and populates `responses`
      * (ServerHello record + 4 encrypted records) for the transport to replay.
+     *
+     * When the `helloRetryRequest` option is set, the *first* call responds
+     * with an HRR; the *second* call (ClientHello_2) gets the real flight. The
+     * server tracks both ClientHellos to compute the correct transcript hash
+     * (which includes the synthetic message_hash per RFC 8446 §4.4.1).
      */
     onClientHello(clientHelloRecord: Uint8Array): void {
         const clientHelloMsg = clientHelloRecord.subarray(5); // strip record header
         this.clientHelloMsg = clientHelloMsg;
         this.clientKeySharePub = this.extractClientKeyShare(clientHelloMsg);
+
+        // HRR flow: first ClientHello → send HRR, wait for ClientHello_2.
+        if (this.opts.helloRetryRequest && !this.hrrSent) {
+            this.hrrSent = true;
+            this.clientHello1Msg = clientHelloMsg;
+            this.hrrMsg = this.buildHelloRetryRequestMessage();
+            const hrrRecord = concatBytes(
+                serializeRecordHeader(ContentType.HANDSHAKE, this.hrrMsg.length),
+                this.hrrMsg,
+            );
+            this.responses = [hrrRecord];
+            return;
+        }
 
         // ServerHello (plaintext handshake record).
         const serverHelloMsg = this.buildServerHelloMessage();
@@ -319,7 +465,18 @@ export class TlsServerSim {
             ? this.x25519Backend.sharedSecret(this.serverKeys.secretKey, this.clientKeySharePub)
             : crypto.x25519SharedSecret(this.serverKeys.secretKey, this.clientKeySharePub);
         const cipherSuite = "TLS_AES_128_GCM_SHA256" as const;
-        const helloTranscript = [clientHelloMsg, serverHelloMsg];
+
+        // Compute the hello transcript hash. After HRR, the transcript includes
+        // the synthetic message_hash(ClientHello_1) || HRR || ClientHello_2 ||
+        // ServerHello_2 (RFC 8446 §4.4.1).
+        let helloTranscript: Uint8Array[];
+        if (this.hrrSent && this.clientHello1Msg !== undefined && this.hrrMsg !== undefined) {
+            const ch1Hash = transcriptHash([this.clientHello1Msg], "SHA-256", crypto);
+            const messageHashMsg = buildMessageHashMessage(ch1Hash);
+            helloTranscript = [messageHashMsg, this.hrrMsg, clientHelloMsg, serverHelloMsg];
+        } else {
+            helloTranscript = [clientHelloMsg, serverHelloMsg];
+        }
         const helloHash = transcriptHash(helloTranscript, "SHA-256", crypto);
         const { clientTrafficSecret, serverTrafficSecret } =
             deriveHandshakeTrafficSecrets(sharedSecret, helloHash, cipherSuite, crypto);
@@ -329,8 +486,11 @@ export class TlsServerSim {
         // client will see them post-decryption).
         const ee = this.buildEncryptedExtensionsMessage();
         const cert = this.buildCertificateMessage();
-        const cv = this.buildCertificateVerifyMessage();
-        const transcriptBeforeFinished = [clientHelloMsg, serverHelloMsg, ee, cert, cv];
+        // The transcript for CertificateVerify covers ClientHello..Certificate.
+        // After HRR, it includes the message_hash prefix + HRR + ClientHello_2.
+        const transcriptBeforeCertVerify = [...helloTranscript, ee, cert];
+        const cv = this.buildCertificateVerifyMessage(transcriptBeforeCertVerify);
+        const transcriptBeforeFinished = [...transcriptBeforeCertVerify, cv];
         const fin = this.buildFinishedMessage(serverTrafficSecret, transcriptBeforeFinished);
 
         // Encrypt the server flight under the server handshake key. RFC 8446
@@ -356,7 +516,18 @@ export class TlsServerSim {
             }
         }
 
-        this.responses = [shRecord, ...encrypted];
+        // RFC 8446 §5 middlebox-compatibility CCS record: content type 0x14,
+        // version 0x0303, length 1, payload 0x01. The client MUST silently
+        // ignore it. Real TLS 1.3 servers insert this between ServerHello and
+        // the encrypted flight.
+        const ccsRecord = concatBytes(
+            serializeRecordHeader(ContentType.CHANGE_CIPHER_SPEC, 1),
+            new Uint8Array([0x01]),
+        );
+
+        this.responses = this.opts.sendCcs
+            ? [shRecord, ccsRecord, ...encrypted]
+            : [shRecord, ...encrypted];
         // Reference unused values to satisfy strict linters under esbuild.
         void clientTrafficSecret;
     }

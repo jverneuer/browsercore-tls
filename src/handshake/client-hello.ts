@@ -107,6 +107,7 @@ export function buildClientHello(
     keyPairs: readonly KeyPair[],
     random: () => number,
     provider: CryptoProvider,
+    cookie?: Uint8Array,
 ): Uint8Array {
     const greaseValue = config.grease ? generateGreaseValue(random) : 0;
 
@@ -114,7 +115,7 @@ export function buildClientHello(
     const sessionId = new Uint8Array(0);
     const compressionMethods = new Uint8Array([0x00]);
 
-    const extensions = buildClientHelloExtensions(config, keyPairs, greaseValue, provider);
+    const extensions = buildClientHelloExtensions(config, keyPairs, greaseValue, provider, cookie);
 
     const cipherWires: number[] = config.cipherSuites.map((suite, i) => {
         if (suite === undefined) {
@@ -185,6 +186,7 @@ function buildClientHelloExtensions(
     keyPairs: readonly KeyPair[],
     greaseValue: number,
     provider: CryptoProvider,
+    cookie?: Uint8Array,
 ): Uint8Array {
     const order = config.grease
         ? [greaseValue, ...config.extensionOrder]
@@ -198,6 +200,14 @@ function buildClientHelloExtensions(
         // legitimately produce zero-length bodies — they must still be emitted.
         if (body === undefined) { continue; }
         parts.push(wrapExtension(type, body));
+    }
+
+    // RFC 8446 §4.2.2: when the server sent a cookie in HelloRetryRequest, the
+    // client MUST echo it in the new ClientHello. The cookie extension is
+    // appended after the profile's extensions so the original fingerprint order
+    // is preserved.
+    if (cookie !== undefined && cookie.length > 0) {
+        parts.push(wrapExtension(ExtensionType.COOKIE, encodeCookie(cookie)));
     }
 
     let total = 0;
@@ -336,6 +346,20 @@ function encodeStatusRequest(): Uint8Array {
 
 function encodeRenegotiationInfo(): Uint8Array {
     return new Uint8Array([0x00]);
+}
+
+/**
+ * Encode a cookie extension body (RFC 8446 §4.2.2).
+ *
+ * Layout: `cookie_length(2) || cookie`. The cookie is an opaque blob the server
+ * sent in HelloRetryRequest; the client echoes it verbatim.
+ */
+function encodeCookie(cookie: Uint8Array): Uint8Array {
+    const out = new Uint8Array(2 + cookie.length);
+    out[0] = (cookie.length >> 8) & 0xff;
+    out[1] = cookie.length & 0xff;
+    out.set(cookie, 2);
+    return out;
 }
 
 function wrapExtension(type: number, data: Uint8Array): Uint8Array {

@@ -106,9 +106,10 @@ connection.
 | `src/extensions/` | Extension types, parsers, and wire encoders |
 | `src/connection/handshake-driver.ts` | Handshake choreography (what to send, what to read, when to derive) |
 | `src/connection/record-layer.ts` | TLS 1.3 inner-content-type wrapping, nonce XOR, record framing |
-| `src/connection/key-exchange.ts` | (EC)DHE shared secret, transcript hash, server Finished verification |
+| `src/connection/key-exchange.ts` | (EC)DHE shared secret, transcript hash, server Finished verification, CertificateVerify verification |
 | `src/connection/handshake-messages.ts` | EncryptedExtensions/Certificate/Finished parsing, client Finished builder |
-| `src/connection/lifecycle.ts` | Timeouts, alerts, state transitions, post-handshake record dispatch |
+| `src/handshake/hello-retry-request.ts` | HelloRetryRequest detection (RFC 8446 §4.1.3 sentinel) and cookie handling |
+| `src/connection/lifecycle.ts` | Timeouts (with phase-attributed errors), alerts, state transitions, post-handshake record dispatch |
 
 Errors all carry a `kind` discriminator so callers can narrow and inspect
 without leaking backend specifics (`TlsHandshakeError(phase)`,
@@ -116,11 +117,9 @@ without leaking backend specifics (`TlsHandshakeError(phase)`,
 
 ## Not implemented
 
-- Post-handshake messages (NewSessionTicket, KeyUpdate)
-- Session resumption / PSK / 0-RTT
+- NewSessionTicket / session resumption / PSK / 0-RTT
 - Mutual TLS (client certificate)
 - Certificate compression
-- HelloRetryRequest
 - Additional key-share groups beyond X25519
 
 ## Development

@@ -26,12 +26,25 @@ export class TlsError extends Error {
     }
 }
 
-/** The handshake phase at which a {@link TlsHandshakeError} occurred. */
+/**
+ * The handshake phase at which a {@link TlsHandshakeError} occurred.
+ *
+ * Granular enough that a timeout or error tells the caller (and the diagnostic
+ * debug trace) EXACTLY which step was in progress. The driver updates a
+ * `currentPhase` field before each step so {@link withTimeout} can report the
+ * true stall location rather than a hardcoded phase.
+ */
 export type HandshakePhase =
+    | "init"
     | "client_hello"
     | "server_hello"
+    | "key_exchange"
+    | "encrypted_extensions"
     | "certificate"
-    | "finished";
+    | "certificate_verify"
+    | "finished"
+    | "client_finished"
+    | "application";
 
 /** The TLS handshake failed at a specific phase. */
 export class TlsHandshakeError extends Error {
@@ -68,6 +81,30 @@ export class TlsDecryptError extends Error {
 
 /** Alert level of a TLS alert, per RFC 8446 §6. */
 export type AlertLevel = "warning" | "fatal";
+
+/**
+ * TLS alert descriptions (IANA TLS Alert Registry, RFC 8446 §6).
+ *
+ * Only the values this client needs to *send* are defined here. Received alert
+ * descriptions are passed through as raw numbers (see {@link TlsAlertError}).
+ */
+export const AlertDescription = {
+    /** Graceful close (RFC 8446 §6.1). */
+    CLOSE_NOTIFY: 0,
+    /** Unacceptable cipher suite or version negotiation. */
+    HANDSHAKE_FAILURE: 40,
+    /** Certificate chain validation or hostname check failed. */
+    BAD_CERTIFICATE: 42,
+    /** A handshake parameter was illegal or inconsistent (e.g. downgrade sentinel). */
+    ILLEGAL_PARAMETER: 47,
+    /** A handshake cryptographic operation failed (signature or Finished mismatch). */
+    DECRYPT_ERROR: 51,
+    /** Unexpected exception not covered by a more specific alert. */
+    INTERNAL_ERROR: 80,
+} as const;
+
+/** Union of alert-description values this client can send. */
+export type AlertDescription = (typeof AlertDescription)[keyof typeof AlertDescription];
 
 /** A TLS alert received from the peer (or sent to the peer). */
 export class TlsAlertError extends Error {

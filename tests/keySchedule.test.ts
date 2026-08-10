@@ -125,13 +125,18 @@ describe("deriveApplicationSecrets", () => {
 });
 
 describe("updateTrafficSecrets (KeyUpdate)", () => {
-    it("re-derives fresh key/iv from the current traffic secret", () => {
+    it("re-derives fresh key/iv and the next raw secret from the current traffic secret", () => {
         const currentSecret = crypto.randomBytes(32);
         const next = updateTrafficSecrets(currentSecret, "TLS_AES_128_GCM_SHA256", crypto);
-        expect(next.key.length).toBe(16);
-        expect(next.iv.length).toBe(12);
-        // The new secret must differ from a trivial re-use of the input.
-        expect(next.key).not.toEqual(currentSecret.subarray(0, 16));
+        expect(next.traffic.key.length).toBe(16);
+        expect(next.traffic.iv.length).toBe(12);
+        expect(next.secret.length).toBe(32);
+        // The new key/secret must differ from a trivial re-use of the input.
+        expect(next.traffic.key).not.toEqual(currentSecret.subarray(0, 16));
+        expect(next.secret).not.toEqual(currentSecret);
+        // The next raw secret can itself be fed back for a subsequent KeyUpdate.
+        const next2 = updateTrafficSecrets(next.secret, "TLS_AES_128_GCM_SHA256", crypto);
+        expect(next2.traffic.key).not.toEqual(next.traffic.key);
     });
 });
 
