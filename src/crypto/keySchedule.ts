@@ -341,6 +341,11 @@ export function deriveHandshakeSecrets(
  * Derive the application traffic secrets from the master secret and the
  * ClientHello..server Finished transcript.
  *
+ * Returns the {@link ApplicationTrafficSecrets} (key + IV per direction) plus
+ * the raw application traffic secrets, which the connection retains so it can
+ * rotate keys via {@link updateTrafficSecrets} when a KeyUpdate is received or
+ * sent (RFC 8446 §4.6.3).
+ *
  * @param masterSecret        Master secret returned by {@link deriveHandshakeSecrets}.
  * @param handshakeTranscript Transcript hash of ClientHello..server Finished.
  * @param cipherSuite         Negotiated cipher suite (selects hash + AEAD sizes).
@@ -350,7 +355,7 @@ export function deriveApplicationSecrets(
     handshakeTranscript: Uint8Array,
     cipherSuite: CipherSuite,
     provider: CryptoProvider,
-): ApplicationTrafficSecrets {
+): ApplicationTrafficSecrets & { readonly clientSecret: Uint8Array; readonly serverSecret: Uint8Array } {
     const hash = cipherSuiteToHash(cipherSuite);
     const hashLen = hashLengthFor(hash);
 
@@ -360,6 +365,8 @@ export function deriveApplicationSecrets(
     return {
         client: deriveTrafficSecrets(clientApTraffic, cipherSuite, hash, provider),
         server: deriveTrafficSecrets(serverApTraffic, cipherSuite, hash, provider),
+        clientSecret: clientApTraffic,
+        serverSecret: serverApTraffic,
     };
 }
 
@@ -369,14 +376,23 @@ export function deriveApplicationSecrets(
  *   application_traffic_secret_N+1 =
  *       HKDF-Expand-Label(application_traffic_secret_N, "traffic upd", "", Hash.length)
  *
+ * Returns both the derived {@link TrafficSecrets} (key + IV) and the new raw
+ * traffic secret, so the caller can store the raw secret for a subsequent
+ * KeyUpdate. The raw secret is needed because {@link updateTrafficSecrets}
+ * takes the *raw* traffic secret as input — not the key+IV.
+ *
  * @param currentSecret The current application traffic secret (Hash.length bytes).
  * @param cipherSuite   Negotiated cipher suite (selects hash + AEAD sizes).
  */
-export function updateTrafficSecrets(currentSecret: Uint8Array, cipherSuite: CipherSuite, provider: CryptoProvider): TrafficSecrets {
+export function updateTrafficSecrets(
+    currentSecret: Uint8Array,
+    cipherSuite: CipherSuite,
+    provider: CryptoProvider,
+): { traffic: TrafficSecrets; secret: Uint8Array } {
     const hash = cipherSuiteToHash(cipherSuite);
     const hashLen = hashLengthFor(hash);
     const nextSecret = hkdfExpandLabel(currentSecret, "traffic upd", new Uint8Array(0), hashLen, hash, provider);
-    return deriveTrafficSecrets(nextSecret, cipherSuite, hash, provider);
+    return { traffic: deriveTrafficSecrets(nextSecret, cipherSuite, hash, provider), secret: nextSecret };
 }
 
 /** Validate that the server selected a cipher suite we actually offered. */

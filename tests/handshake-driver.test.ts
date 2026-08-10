@@ -38,10 +38,15 @@ const PROFILE: ClientHelloConfig = {
  * ClientHello (a plaintext HANDSHAKE record), the simulator builds the server's
  * full flight and queues it for read(). Subsequent writes (the client's
  * encrypted Finished) are just buffered.
+ *
+ * For HelloRetryRequest tests, the client writes TWO ClientHello records (the
+ * second after receiving the HRR). The transport triggers the sim on every
+ * HANDSHAKE write — the sim tracks its own state (first call → HRR, second
+ * call → real flight). The client's Finished is APPLICATION_DATA, so it never
+ * re-triggers.
  */
 class HandshakeTransport extends FakeTransport {
     private sim: TlsServerSim;
-    private triggered = false;
 
     constructor(sim: TlsServerSim) {
         super();
@@ -50,8 +55,7 @@ class HandshakeTransport extends FakeTransport {
 
     public override async write(data: Uint8Array): Promise<void> {
         await super.write(data);
-        if (!this.triggered && data.length > 0 && data[0] === ContentType.HANDSHAKE) {
-            this.triggered = true;
+        if (data.length > 0 && data[0] === ContentType.HANDSHAKE) {
             this.sim.onClientHello(data);
             for (const resp of this.sim.responses) {
                 this.readQueue.push(resp);
@@ -272,5 +276,71 @@ describe("connectTls full handshake (runHandshake)", () => {
         });
         expect(conn.state.state).toBe("open");
         expect(conn.alpnProtocol).toBe("h2");
+    });
+
+    // -----------------------------------------------------------------------
+    // CertificateVerify verification (RFC 8446 §4.4.3).
+    //
+    // The server sim now generates a REAL ECDSA P-256 signature over the
+    // transcript hash. These tests confirm the client verifies it: a valid
+    // signature lets the handshake proceed, while a tampered signature causes
+    // an immediate abort at the certificate_verify phase.
+    // -----------------------------------------------------------------------
+
+    it("verifies the CertificateVerify signature against the leaf cert public key (happy path)", async () => {
+        // The default sim generates a real signature, so every handshake that
+        // reaches the open state implicitly passes CertificateVerify
+        // verification. This test makes that expectation explicit.
+        const sim = new TlsServerSim();
+        const transport = new HandshakeTransport(sim);
+        const conn = await connectTls({
+            transport,
+            crypto,
+            serverName: "example.com",
+            profile: PROFILE,
+            events: createMockEventProvider(),
+        });
+        expect(conn.state.state).toBe("open");
+    });
+
+    it("rejects a tampered CertificateVerify signature with a certificate_verify error", async () => {
+        const sim = new TlsServerSim({ tamperCertificateVerify: true });
+        const transport = new HandshakeTransport(sim);
+        try {
+            await connectTls({
+                transport,
+                crypto,
+                serverName: "example.com",
+                profile: PROFILE,
+                events: createMockEventProvider(),
+            });
+            expect.unreachable("expected a CertificateVerify verification failure");
+        } catch (e) {
+            const err = e as TlsHandshakeError;
+            expect(err).toBeInstanceOf(TlsHandshakeError);
+            expect(err.phase).toBe("certificate_verify");
+            expect(err.cause?.message).toMatch(/does not match the leaf certificate public key/);
+        }
+    });
+
+    it("rejects a tampered CertificateVerify in a coalesced flight", async () => {
+        // With coalesced packing, the corruption is inside a single encrypted
+        // record containing EE + Cert + CV + Finished. The AEAD decrypt still
+        // succeeds (corruption is in the plaintext), but the signature check
+        // fails — confirming verification works regardless of record packing.
+        const sim = new TlsServerSim({
+            recordPacking: "coalesced",
+            tamperCertificateVerify: true,
+        });
+        const transport = new HandshakeTransport(sim);
+        await expect(
+            connectTls({
+                transport,
+                crypto,
+                serverName: "example.com",
+                profile: PROFILE,
+                events: createMockEventProvider(),
+            }),
+        ).rejects.toThrow(/certificate_verify/);
     });
 });

@@ -40,3 +40,10 @@ export {
     isKeyShareGroup,
     isTls13,
 } from "./state-machine.js";
+export {
+    HELLO_RETRY_REQUEST_RANDOM,
+    isHelloRetryRequest,
+    parseHelloRetryRequestExtensions,
+    buildMessageHashMessage,
+    type HelloRetryRequestExtensions,
+} from "./hello-retry-request.js";

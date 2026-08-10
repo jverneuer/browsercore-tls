@@ -224,6 +224,14 @@ export interface TlsOptions {
      * Inject the runtime EventProvider via the composition root (browsersmith).
      */
     readonly events: EventProvider;
+    /**
+     * Optional debug trace callback. When provided, the handshake driver and
+     * record layer emit a line before/after each I/O and crypto step
+     * (transport.read, AEAD encrypt/decrypt, key derivation, each handshake
+     * message type). This is the primary diagnostic tool for pinpointing
+     * handshake stalls — pass `console.error` or a custom logger to capture it.
+     */
+    readonly onDebug?: (msg: string) => void;
 }
 
 /**

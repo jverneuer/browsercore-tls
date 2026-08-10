@@ -11,6 +11,7 @@ import type { CipherSuite, ProtocolVersion } from "../types.js";
 import { TlsHandshakeError } from "../errors.js";
 import { ExtensionType, findExtension, parseExtensions } from "../extensions/extensions.js";
 import { assertCipherSuiteOffered, assertVersionSupported } from "../crypto/keySchedule.js";
+import { constantTimeEqual } from "../utils.js";
 import type { ServerHello } from "./handshake-types.js";
 
 /**
@@ -38,6 +39,41 @@ const TLS12_CIPHER_SUITES: ReadonlySet<number> = new Set([
     0xc02b, 0xc02c, 0xc02f, 0xc030, 0xcca8, 0xcca9,
     0xccaa, 0x0004, 0x0005, 0x000a, 0x0009, 0x0016,
 ]);
+
+/**
+ * Downgrade sentinels in the last 8 bytes of ServerHello.random (RFC 8446
+ * §4.1.3). A TLS 1.3 server MUST NOT set these; their presence means the
+ * negotiating peer is a TLS 1.2 (or earlier) implementation that intentionally
+ * inserted the sentinel to prevent downgrade attacks. If a client negotiating
+ * TLS 1.3 sees them, it MUST abort with {@link TlsHandshakeError} — the server
+ * is either buggy or malicious.
+ *
+ * - `DOWNGRD\x01` (`44 4F 57 4E 47 52 44 01`): TLS 1.2 downgrade sentinel
+ * - `DOWNGRD\x00` (`44 4F 57 4E 47 52 44 00`): TLS 1.1 or below downgrade sentinel
+ */
+const DOWNGRADE_SENTINEL_TLS12 = new Uint8Array([0x44, 0x4f, 0x57, 0x4e, 0x47, 0x52, 0x44, 0x01]);
+const DOWNGRADE_SENTINEL_TLS11 = new Uint8Array([0x44, 0x4f, 0x57, 0x4e, 0x47, 0x52, 0x44, 0x00]);
+
+/**
+ * Check the last 8 bytes of ServerHello.random for a downgrade sentinel
+ * (RFC 8446 §4.1.3). Throws {@link TlsHandshakeError} with phase "server_hello"
+ * if either sentinel is present — the client MUST abort with `illegal_parameter`.
+ */
+function checkDowngradeSentinel(random: Uint8Array): void {
+    const tail = random.subarray(24, 32);
+    if (
+        constantTimeEqual(tail, DOWNGRADE_SENTINEL_TLS12) ||
+        constantTimeEqual(tail, DOWNGRADE_SENTINEL_TLS11)
+    ) {
+        throw new TlsHandshakeError("server_hello", {
+            cause: new Error(
+                "ServerHello.random contains a downgrade sentinel — the server is " +
+                "attempting to negotiate TLS 1.2 or below in a TLS 1.3 handshake " +
+                "(RFC 8446 §4.1.3 requires the client to abort with illegal_parameter)",
+            ),
+        });
+    }
+}
 
 /** Invert the cipher-suite wire values; throws on unknown values. */
 function wireToCipherSuite(wire: number): CipherSuite {
@@ -119,6 +155,11 @@ export function parseServerHello(buf: Uint8Array, offered: ServerHelloValidation
     const protocolVersion = (readByte() << 8) | readByte();
     const random = buf.subarray(o, o + 32);
     o += 32;
+
+    // RFC 8446 §4.1.3: check the last 8 bytes of ServerHello.random for a
+    // downgrade sentinel. A TLS 1.3 server MUST NOT set these — their presence
+    // means the peer is actually TLS 1.2 or below, and the client MUST abort.
+    checkDowngradeSentinel(random);
 
     const sessionIdLen = readByte();
     expect(sessionIdLen);

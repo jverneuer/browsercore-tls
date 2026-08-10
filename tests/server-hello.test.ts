@@ -36,8 +36,10 @@ function buildServerHelloBody(opts: {
     compression?: number;
     sessionId?: Uint8Array;
     versionWire?: number;
+    /** Override the 32-byte random field (default: 32 bytes of 0x5a). */
+    random?: Uint8Array;
 } = {}): Uint8Array {
-    const random = new Uint8Array(32).fill(0x5a);
+    const random = opts.random ?? new Uint8Array(32).fill(0x5a);
     const sessionId = opts.sessionId ?? new Uint8Array(0);
     const cipherSuite = opts.cipherSuite ?? 0x1301;
     const compression = opts.compression ?? 0x00;
@@ -155,5 +157,59 @@ describe("selectVersion (server negotiates a version we did not offer)", () => {
             expect(err).toBeInstanceOf(TlsHandshakeError);
             expect(err.cause?.message).toMatch(/server negotiated version we did not offer/);
         }
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Downgrade protection sentinels (RFC 8446 §4.1.3)
+// ---------------------------------------------------------------------------
+
+describe("parseServerHello downgrade protection", () => {
+    it("rejects a TLS 1.2 downgrade sentinel in the last 8 bytes of random", () => {
+        // DOWNGRD\x01 = 44 4F 57 4E 47 52 44 01
+        const random = new Uint8Array(32).fill(0x5a);
+        random.set([0x44, 0x4f, 0x57, 0x4e, 0x47, 0x52, 0x44, 0x01], 24);
+        const body = buildServerHelloBody({ random });
+
+        try {
+            parseServerHello(body, OFFERED);
+            expect.unreachable("expected a throw");
+        } catch (e) {
+            const err = e as TlsHandshakeError;
+            expect(err).toBeInstanceOf(TlsHandshakeError);
+            expect(err.phase).toBe("server_hello");
+            expect(err.cause?.message).toMatch(/downgrade sentinel/);
+        }
+    });
+
+    it("rejects a TLS 1.1-or-below downgrade sentinel in the last 8 bytes of random", () => {
+        // DOWNGRD\x00 = 44 4F 57 4E 47 52 44 00
+        const random = new Uint8Array(32).fill(0x5a);
+        random.set([0x44, 0x4f, 0x57, 0x4e, 0x47, 0x52, 0x44, 0x00], 24);
+        const body = buildServerHelloBody({ random });
+
+        try {
+            parseServerHello(body, OFFERED);
+            expect.unreachable("expected a throw");
+        } catch (e) {
+            const err = e as TlsHandshakeError;
+            expect(err.cause?.message).toMatch(/downgrade sentinel/);
+        }
+    });
+
+    it("accepts a normal ServerHello whose last 8 bytes are not a sentinel", () => {
+        // The default 0x5a fill does not match either sentinel — must succeed.
+        const body = buildServerHelloBody();
+        const hello = parseServerHello(body, OFFERED);
+        expect(hello.selectedVersion).toBe(TLS_1_3);
+    });
+
+    it("accepts a random field whose tail coincidentally starts with DOWNGRD but is not a sentinel", () => {
+        // 44 4F 57 4E 47 52 44 02 — shares the prefix but the last byte differs.
+        const random = new Uint8Array(32).fill(0x5a);
+        random.set([0x44, 0x4f, 0x57, 0x4e, 0x47, 0x52, 0x44, 0x02], 24);
+        const body = buildServerHelloBody({ random });
+        const hello = parseServerHello(body, OFFERED);
+        expect(hello.selectedVersion).toBe(TLS_1_3);
     });
 });

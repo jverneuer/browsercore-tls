@@ -18,6 +18,7 @@ export {
     buildClientFinishedMessage,
     parseAlpnFromEncryptedExtensions,
     readEncryptedHandshakeMessage,
+    splitHandshakeMessages,
     validateCertificateChain,
 } from "./handshake-messages.js";
 export {
@@ -28,3 +29,4 @@ export {
     writeRecord,
 } from "./record-layer.js";
 export { runHandshake, type HandshakeContext } from "./handshake-driver.js";
+export { updateTrafficSecrets } from "../crypto/keySchedule.js";

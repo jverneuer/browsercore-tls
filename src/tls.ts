@@ -40,19 +40,20 @@ import {
     type TlsState,
     type TrafficSecrets,
 } from "./types.js";
-import { TlsHandshakeError, ensureTlsError, type TlsError } from "./errors.js";
+import { TlsHandshakeError, TlsDecryptError, AlertDescription, ensureTlsError, type AlertLevel, type HandshakePhase, type TlsError } from "./errors.js";
 import { createId } from "./utils.js";
 import { ContentType, type encryptRecord } from "./record/record.js";
+import { HandshakeType, type ServerHello } from "./handshake/handshake.js";
 import type { Certificate } from "./certificates/certificates.js";
-import type { ServerHello } from "./handshake/handshake.js";
 import {
     ensureOpen,
     handleAlert as handleAlertRecord,
-    handlePostHandshakeRecord as dispatchPostHandshakeRecord,
     withTimeout,
     readEncryptedRecord,
     writeEncryptedRecord,
     runHandshake,
+    splitHandshakeMessages,
+    updateTrafficSecrets,
     type HandshakeContext,
 } from "./connection/index.js";
 
@@ -164,6 +165,18 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
     public masterSecret!: Uint8Array;
     public clientHsSeq = 0;
     public serverHsSeq = 0;
+    /**
+     * Raw application traffic secrets, retained for KeyUpdate key rotation
+     * (RFC 8446 §4.6.3). Set by the driver when application secrets are derived.
+     */
+    public clientAppSecret!: Uint8Array;
+    public serverAppSecret!: Uint8Array;
+    /** True once handshake traffic keys are derived — gates sendAlert during handshake. */
+    public hsTrafficReady = false;
+    /** Mutable: current handshake phase, updated by the driver for timeout attribution. */
+    public currentPhase: HandshakePhase = "init";
+    /** Optional debug trace callback, set from TlsOptions.onDebug. */
+    public onDebug: ((msg: string) => void) | undefined;
 
     private applicationSecrets!: ApplicationTrafficSecrets;
     private clientAppSeq = 0;
@@ -204,6 +217,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
             this.transport = options.transport;
             this.serverName = options.serverName;
             this.trustAnchors = options.trustAnchors ?? [];
+            this.onDebug = options.onDebug;
 
             // An explicit alpnProtocols option overrides whatever the profile says.
             this.profile =
@@ -265,7 +279,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
         if (this.state.state === "open") {
             return;
         }
-        await withTimeout(timeoutMs, () => this.performHandshake(), this.clock);
+        await withTimeout(timeoutMs, () => this.performHandshake(), this.clock, () => this.currentPhase);
     }
 
     /**
@@ -280,7 +294,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
             if (payload === undefined) {
                 // Length was just checked; this is unreachable but required so the
                 // non-null assertion can be dropped under noUncheckedIndexedAccess.
-                throw new TlsHandshakeError("finished", {
+                throw new TlsHandshakeError("application", {
                     cause: new Error("application data queue emptied between check and shift"),
                 });
             }
@@ -299,13 +313,15 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
                 this.applicationSecrets.server,
                 this.serverAppSeq,
                 this.crypto,
+                this.onDebug,
             );
             this.readBuffer = readBuffer;
             this.serverAppSeq++;
             if (innerType === ContentType.APPLICATION_DATA) {
                 return { payload: content };
             }
-            this.handlePostHandshakeRecord(innerType, content);
+            // eslint-disable-next-line no-await-in-loop
+            await this.handlePostHandshakeRecord(innerType, content);
         }
     }
 
@@ -327,6 +343,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
                     fragment,
                     this.clientAppSeq,
                     this.crypto,
+                    this.onDebug,
                 );
                 this.clientAppSeq++;
             }
@@ -353,6 +370,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
                     alert,
                     this.clientAppSeq,
                     this.crypto,
+                    this.onDebug,
                 );
             } catch {
                 // ignore — we are closing anyway
@@ -374,18 +392,36 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
      * HandshakeContext fields and returns the derived application secrets, which
      * we store for read()/write(). `now` is read here (in the orchestrator) so
      * certificate validation stays pure and testable.
+     *
+     * Error cleanup (RFC 8446 §6): on any failure the method sends a fatal
+     * alert (best-effort), closes the transport to prevent socket leaks, and
+     * transitions to the `closed` terminal state before re-throwing.
      */
     private async performHandshake(): Promise<void> {
         this.state = { state: "handshaking" };
         const now = Math.floor(this.clock.now() / 1000);
-        this.applicationSecrets = await runHandshake(
-            this,
-            this.profile,
-            this.serverName,
-            this.trustAnchors,
-            (groups) => generateKeyShares(groups, this.crypto),
-            now,
-        );
+        try {
+            this.applicationSecrets = await runHandshake(
+                this,
+                this.profile,
+                this.serverName,
+                this.trustAnchors,
+                (groups) => generateKeyShares(groups, this.crypto),
+                now,
+            );
+        } catch (cause) {
+            // Best-effort: send a fatal alert mapped to the error type, then
+            // close the transport. Never let cleanup failures mask the original.
+            const error = ensureTlsError(cause);
+            await this.sendAlert("fatal", this.errorToAlertDescription(error));
+            try {
+                await this.transport.close();
+            } catch {
+                // Best-effort — the transport may already be broken.
+            }
+            this.transition({ state: "closed", reason: { kind: "error", error } });
+            throw cause;
+        }
         // Expose the negotiated parameters the driver wrote onto the context.
         this.protocolVersion = this.serverHello.selectedVersion;
 
@@ -400,8 +436,86 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
         });
     }
 
+    /**
+     * Send a TLS alert (RFC 8446 §6) to the peer.
+     *
+     * Best-effort: if the traffic keys are not yet derived (early handshake
+     * failure), or the transport write fails, the alert is silently dropped.
+     * The caller's error-handling path (transport close) is the fallback.
+     *
+     * During the handshake, the alert is sent under the client handshake traffic
+     * key; after the handshake, under the client application traffic key.
+     */
+    public async sendAlert(level: AlertLevel, description: number): Promise<void> {
+        try {
+            const alertBody = new Uint8Array([level === "fatal" ? 0x02 : 0x01, description]);
+            if (this.state.state === "handshaking" && this.hsTrafficReady) {
+                await writeEncryptedRecord(
+                    this.transport,
+                    this.aead,
+                    this.clientHsTraffic,
+                    ContentType.ALERT,
+                    alertBody,
+                    this.clientHsSeq,
+                    this.crypto,
+                    this.onDebug,
+                );
+                this.clientHsSeq++;
+            } else if (this.state.state === "open") {
+                await writeEncryptedRecord(
+                    this.transport,
+                    this.aead,
+                    this.applicationSecrets.client,
+                    ContentType.ALERT,
+                    alertBody,
+                    this.clientAppSeq,
+                    this.crypto,
+                    this.onDebug,
+                );
+                this.clientAppSeq++;
+            }
+            // If neither condition holds (e.g. connecting state, before keys
+            // derived), we cannot encrypt — skip silently. Best-effort by design.
+        } catch {
+            // Never let an alert-sending failure mask the original error.
+        }
+    }
+
+    /**
+     * Map a typed TLS error to the appropriate alert description for sending
+     * before connection teardown (RFC 8446 §6).
+     *
+     * - `handshake_failure` (40): bad cipher suite / version negotiation
+     * - `bad_certificate` (42): certificate chain or hostname validation failure
+     * - `decrypt_error` (51): signature verification or Finished verify_data mismatch
+     * - `illegal_parameter` (47): downgrade sentinel, unexpected message
+     * - `internal_error` (80): anything not covered above
+     */
+    private errorToAlertDescription(error: TlsError): number {
+        // ensureTlsError wraps non-TlsError exceptions (TlsHandshakeError,
+        // TlsDecryptError) in a TlsError with the original as .cause.
+        const cause = error.cause;
+        if (cause instanceof TlsHandshakeError) {
+            const message = cause.cause?.message ?? "";
+            if (message.includes("downgrade") || message.includes("illegal")) {
+                return AlertDescription.ILLEGAL_PARAMETER;
+            }
+            if (cause.phase === "certificate") {
+                return AlertDescription.BAD_CERTIFICATE;
+            }
+            if (cause.phase === "certificate_verify" || cause.phase === "finished") {
+                return AlertDescription.DECRYPT_ERROR;
+            }
+            return AlertDescription.HANDSHAKE_FAILURE;
+        }
+        if (cause instanceof TlsDecryptError) {
+            return AlertDescription.DECRYPT_ERROR;
+        }
+        return AlertDescription.INTERNAL_ERROR;
+    }
+
     /** Handle a non-application record encountered while reading application data. */
-    private handlePostHandshakeRecord(innerType: ContentType, content: Uint8Array): void {
+    private async handlePostHandshakeRecord(innerType: ContentType, content: Uint8Array): Promise<void> {
         if (innerType === ContentType.ALERT) {
             // Alerts need connection-specific handling (state transition + error
             // emission) that the shared dispatcher does not own.
@@ -417,10 +531,91 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
             }
             return;
         }
-        // Non-alert types (HANDSHAKE, CHANGE_CIPHER_SPEC, APPLICATION_DATA):
-        // delegate to the shared, tested dispatcher. It ignores post-handshake
-        // handshake messages and throws on unexpected types.
-        void dispatchPostHandshakeRecord(innerType, content);
+        if (innerType === ContentType.HANDSHAKE) {
+            // Post-handshake handshake messages: KeyUpdate (RFC 8446 §4.6.3)
+            // rotates traffic keys; NewSessionTicket and others are ignored for now.
+            await this.handlePostHandshakeMessage(content);
+            return;
+        }
+        // CHANGE_CIPHER_SPEC or APPLICATION_DATA inside an encrypted record:
+        // neither is valid post-handshake. Reject typed.
+        throw new TlsHandshakeError("application", {
+            cause: new Error(`unexpected post-handshake record type ${innerType}`),
+        });
+    }
+
+    /**
+     * Split a decrypted post-handshake handshake record into individual messages
+     * and dispatch each by type. KeyUpdate rotates traffic keys; all other types
+     * (NewSessionTicket, post-handshake CertificateRequest) are silently ignored.
+     */
+    private async handlePostHandshakeMessage(content: Uint8Array): Promise<void> {
+        const messages = splitHandshakeMessages(content);
+        for (const msg of messages) {
+            const typeByte = msg[0];
+            if (typeByte === HandshakeType.KEY_UPDATE) {
+                // eslint-disable-next-line no-await-in-loop
+                await this.handleKeyUpdate(msg.subarray(4));
+            }
+            // Other post-handshake message types are ignored — they do not
+            // affect the connection's traffic keys or state.
+        }
+    }
+
+    /**
+     * Handle a received KeyUpdate (RFC 8446 §4.6.3).
+     *
+     * Upon receiving KeyUpdate, the receiver MUST immediately update its
+     * *receiving* keys (the keys for reading records from the sender) and reset
+     * the corresponding sequence counter to zero. If `request_update` is
+     * `update_requested` (1), the receiver MUST send its own KeyUpdate (with
+     * `update_not_requested`) and then update its *sending* keys.
+     */
+    private async handleKeyUpdate(body: Uint8Array): Promise<void> {
+        if (body.length === 0) {
+            throw new TlsHandshakeError("application", {
+                cause: new Error("KeyUpdate message body too short for request_update byte"),
+            });
+        }
+        const requestUpdate = body[0];
+        if (requestUpdate === undefined || requestUpdate > 1) {
+            throw new TlsHandshakeError("application", {
+                cause: new Error(`invalid KeyUpdate request_update value: ${requestUpdate}`),
+            });
+        }
+
+        // Update receiving (server) keys immediately (RFC 8446 §4.6.3).
+        const serverUpdate = updateTrafficSecrets(this.serverAppSecret, this.cipherSuite, this.crypto);
+        this.applicationSecrets = { ...this.applicationSecrets, server: serverUpdate.traffic };
+        this.serverAppSecret = serverUpdate.secret;
+        this.serverAppSeq = 0;
+        this.onDebug?.(`KeyUpdate: server (read) keys rotated, serverAppSeq reset to 0`);
+
+        // If the server requested an update, send our KeyUpdate and then rotate
+        // our sending (client) keys. The KeyUpdate is sent under the OLD client
+        // keys; the new keys apply to all subsequent writes.
+        if (requestUpdate === 1) {
+            // Build KeyUpdate message: type(KEY_UPDATE=24) || length(3) || request_update(0).
+            const keyUpdateMsg = new Uint8Array([HandshakeType.KEY_UPDATE, 0, 0, 1, 0]);
+            await writeEncryptedRecord(
+                this.transport,
+                this.aead,
+                this.applicationSecrets.client,
+                ContentType.HANDSHAKE,
+                keyUpdateMsg,
+                this.clientAppSeq,
+                this.crypto,
+                this.onDebug,
+            );
+            this.clientAppSeq++;
+
+            // Now rotate the client sending keys.
+            const clientUpdate = updateTrafficSecrets(this.clientAppSecret, this.cipherSuite, this.crypto);
+            this.applicationSecrets = { ...this.applicationSecrets, client: clientUpdate.traffic };
+            this.clientAppSecret = clientUpdate.secret;
+            this.clientAppSeq = 0;
+            this.onDebug?.(`KeyUpdate: client (write) keys rotated, clientAppSeq reset to 0`);
+        }
     }
 
     private transition(next: TlsState): void {
