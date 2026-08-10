@@ -17,6 +17,7 @@ import {
     validateCertificateChain,
     buildClientFinishedMessage,
     readEncryptedHandshakeMessage,
+    splitHandshakeMessages,
 } from "../src/connection/handshake-messages.js";
 import { xorNonce } from "../src/connection/record-layer.js";
 import { ContentType, encryptRecord, serializeRecordHeader } from "../src/record/record.js";
@@ -346,5 +347,75 @@ describe("readEncryptedHandshakeMessage", () => {
         await expect(
             readEncryptedHandshakeMessage(record, new FakeTransport(), "AES-128-GCM", wrong, 0, crypto),
         ).rejects.toThrow(TlsDecryptError);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Coalesced handshake message splitting
+// ---------------------------------------------------------------------------
+
+/** Build a handshake message: type(1) || 24-bit length || body. */
+function hsMessage(type: number, body: Uint8Array): Uint8Array {
+    const msg = new Uint8Array(4 + body.length);
+    msg[0] = type;
+    msg[1] = (body.length >> 16) & 0xff;
+    msg[2] = (body.length >> 8) & 0xff;
+    msg[3] = body.length & 0xff;
+    msg.set(body, 4);
+    return msg;
+}
+
+describe("splitHandshakeMessages", () => {
+    it("returns a single-element array for a non-coalesced record", () => {
+        const msg = hsMessage(8, new Uint8Array([0xaa, 0xbb]));
+        const result = splitHandshakeMessages(msg);
+        expect(result).toHaveLength(1);
+        expect(result[0]).toEqual(msg);
+    });
+
+    it("splits two coalesced messages preserving boundaries", () => {
+        const msg1 = hsMessage(8, new Uint8Array([0x01, 0x02, 0x03]));
+        const msg2 = hsMessage(11, new Uint8Array([0x04, 0x05]));
+        const combined = concatBytes(msg1, msg2);
+        const result = splitHandshakeMessages(combined);
+        expect(result).toHaveLength(2);
+        expect(result[0]).toEqual(msg1);
+        expect(result[1]).toEqual(msg2);
+    });
+
+    it("splits four coalesced messages (the full server flight)", () => {
+        const ee = hsMessage(8, new Uint8Array([0x00, 0x00]));
+        const cert = hsMessage(11, new Uint8Array(20).fill(0xce));
+        const cv = hsMessage(15, new Uint8Array(8).fill(0xee));
+        const fin = hsMessage(20, new Uint8Array(32).fill(0xff));
+        const combined = concatBytes(ee, cert, cv, fin);
+        const result = splitHandshakeMessages(combined);
+        expect(result).toHaveLength(4);
+        expect(result[0]).toEqual(ee);
+        expect(result[1]).toEqual(cert);
+        expect(result[2]).toEqual(cv);
+        expect(result[3]).toEqual(fin);
+    });
+
+    it("returns an empty array for empty content", () => {
+        expect(splitHandshakeMessages(new Uint8Array(0))).toEqual([]);
+    });
+
+    it("throws when the header is truncated (< 4 bytes)", () => {
+        expect(() => splitHandshakeMessages(new Uint8Array([8, 0, 0])))
+            .toThrow(TlsHandshakeError);
+    });
+
+    it("throws when a message body exceeds the content boundary", () => {
+        // Declares 10 bytes of body but only provides 2.
+        const truncated = new Uint8Array([8, 0, 0, 10, 0xaa, 0xbb]);
+        expect(() => splitHandshakeMessages(truncated)).toThrow(TlsHandshakeError);
+    });
+
+    it("throws when the second message header is truncated", () => {
+        const msg1 = hsMessage(8, new Uint8Array([0x01]));
+        // Append only 2 bytes (not enough for a 4-byte header).
+        const combined = concatBytes(msg1, new Uint8Array([0x0b, 0x00]));
+        expect(() => splitHandshakeMessages(combined)).toThrow(TlsHandshakeError);
     });
 });

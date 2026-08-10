@@ -52,6 +52,7 @@ import {
     buildClientFinishedMessage,
     parseAlpnFromEncryptedExtensions,
     readEncryptedHandshakeMessage,
+    splitHandshakeMessages,
     validateCertificateChain,
 } from "./handshake-messages.js";
 import {
@@ -204,6 +205,13 @@ export async function runHandshake(
  * Read the server's encrypted second flight message-by-message, advancing the
  * handshake state machine and updating the transcript. Server Finished is
  * verified against the transcript as it stood *before* the Finished message.
+ *
+ * RFC 8446 §5.1 permits a server to coalesce multiple handshake messages into a
+ * single encrypted record. This function buffers messages from a decrypted
+ * record and only reads + decrypts the next record when the buffer is drained,
+ * so it works correctly whether the server sends one message per record (the
+ * simple case) or packs the entire flight into a single record (the common case
+ * for real TLS 1.3 servers like Cloudflare, nginx, and OpenSSL).
  */
 async function consumeServerFlight(
     ctx: HandshakeContext,
@@ -213,13 +221,50 @@ async function consumeServerFlight(
 ): Promise<void> {
     let phase: HandshakePhase = recordServerHello({ phase: "client_hello_sent" }, ctx.serverHello);
 
+    // Messages parsed from the current record but not yet consumed. The AEAD
+    // sequence number advances once per RECORD (not per message), because all
+    // messages in a coalesced record share the same nonce — so we only
+    // increment serverHsSeq when actually reading a new record.
+    let pendingMessages: Uint8Array[] = [];
+
+    /**
+     * Return the next handshake message from the server, reading and decrypting
+     * a new record only when no buffered messages remain. This decouples
+     * "give me the next handshake message" (what the driver needs) from "read
+     * the next record" (the record-layer operation), bridging the gap that
+     * caused the coalesced-record stall.
+     */
+    async function nextHandshakeMessage(): Promise<{ whole: Uint8Array; body: Uint8Array }> {
+        if (pendingMessages.length > 0) {
+            const msg = pendingMessages.shift();
+            if (msg === undefined) {
+                // Length was just checked; this is unreachable but satisfies
+                // noUncheckedIndexedAccess without a non-null assertion.
+                throw new TlsHandshakeError("finished", {
+                    cause: new Error("pending message queue emptied between check and shift"),
+                });
+            }
+            return { whole: msg, body: msg.subarray(4) };
+        }
+        const result = await readEncryptedHandshakeMessage(
+            ctx.readBuffer, ctx.transport, ctx.aead, ctx.serverHsTraffic, ctx.serverHsSeq,
+            ctx.crypto,
+        );
+        ctx.readBuffer = result.readBuffer;
+        ctx.serverHsSeq++;
+        const messages = splitHandshakeMessages(result.whole);
+        const first = messages.shift();
+        if (first === undefined) {
+            throw new TlsHandshakeError("finished", {
+                cause: new Error("decrypted record contained no handshake messages"),
+            });
+        }
+        pendingMessages = messages;
+        return { whole: first, body: first.subarray(4) };
+    }
+
     // EncryptedExtensions.
-    let message = await readEncryptedHandshakeMessage(
-        ctx.readBuffer, ctx.transport, ctx.aead, ctx.serverHsTraffic, ctx.serverHsSeq,
-    ctx.crypto,
-    );
-    ctx.readBuffer = message.readBuffer;
-    ctx.serverHsSeq++;
+    let message = await nextHandshakeMessage();
     phase = advanceHandshake(phase, HandshakeType.ENCRYPTED_EXTENSIONS);
     ctx.transcript.push(message.whole);
     const alpn = parseAlpnFromEncryptedExtensions(message.body);
@@ -228,35 +273,20 @@ async function consumeServerFlight(
     }
 
     // Certificate.
-    message = await readEncryptedHandshakeMessage(
-        ctx.readBuffer, ctx.transport, ctx.aead, ctx.serverHsTraffic, ctx.serverHsSeq,
-    ctx.crypto,
-    );
-    ctx.readBuffer = message.readBuffer;
-    ctx.serverHsSeq++;
+    message = await nextHandshakeMessage();
     phase = advanceHandshake(phase, HandshakeType.CERTIFICATE);
     ctx.transcript.push(message.whole);
     const chain = await validateCertificateChain(message.body, serverName, trustAnchors, now, ctx.crypto);
     ctx.peerCertificate = chain.leaf;
 
     // CertificateVerify.
-    message = await readEncryptedHandshakeMessage(
-        ctx.readBuffer, ctx.transport, ctx.aead, ctx.serverHsTraffic, ctx.serverHsSeq,
-    ctx.crypto,
-    );
-    ctx.readBuffer = message.readBuffer;
-    ctx.serverHsSeq++;
+    message = await nextHandshakeMessage();
     phase = advanceHandshake(phase, HandshakeType.CERTIFICATE_VERIFY);
     ctx.transcript.push(message.whole);
 
     // Finished — verify against the transcript *before* appending the Finished.
     const finishedTranscript = transcriptHash(ctx.transcript, ctx.hash, ctx.crypto);
-    message = await readEncryptedHandshakeMessage(
-        ctx.readBuffer, ctx.transport, ctx.aead, ctx.serverHsTraffic, ctx.serverHsSeq,
-    ctx.crypto,
-    );
-    ctx.readBuffer = message.readBuffer;
-    ctx.serverHsSeq++;
+    message = await nextHandshakeMessage();
     verifyServerFinished(message.body, finishedTranscript, ctx.hash, ctx.serverHsTrafficSecret, ctx.crypto);
     advanceHandshake(phase, HandshakeType.FINISHED);
     ctx.transcript.push(message.whole);
