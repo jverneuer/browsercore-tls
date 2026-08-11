@@ -113,7 +113,7 @@ export function buildClientHello(
     const greaseValue = config.grease ? generateGreaseValue(random) : 0;
 
     const randomBytes = provider.randomBytes(32);
-    const sessionId = new Uint8Array(0);
+    const sessionId = provider.randomBytes(32);
     const compressionMethods = new Uint8Array([0x00]);
 
     const cipherWires: number[] = config.cipherSuites.map((suite, i) => {
@@ -267,7 +267,7 @@ function encodeExtensionBody(
         case ExtensionType.STATUS_REQUEST:
             return encodeStatusRequest();
         case ExtensionType.SUPPORTED_GROUPS:
-            return encodeSupportedGroups(config.keyShareGroups);
+            return encodeSupportedGroups(config.keyShareGroups, config.grease ? greaseValue : undefined);
         case ExtensionType.EC_POINT_FORMATS:
             return encodeEcPointFormats(config.ecPointFormats);
         case ExtensionType.SIGNATURE_ALGORITHMS:
@@ -289,11 +289,17 @@ function encodeExtensionBody(
         case ExtensionType.EXTENDED_MASTER_SECRET:
             return new Uint8Array(0);
         case ExtensionType.COMPRESS_CERTIFICATE:
-            return encodeCompressCertificate(config.compressCertificateAlgorithms);
+            // Skip — we have no certificate decompression code (RFC 8879).
+            // Advertising it causes servers to respond with CompressedCertificate
+            // (type 25) which our parser can't handle.
+            return undefined;
         case ExtensionType.SESSION_TICKET:
             return new Uint8Array(0);
         case ExtensionType.PRE_SHARED_KEY:
-            return new Uint8Array(0);
+            // No PSK identities to offer — skip the extension entirely.
+            // RFC 8446 §4.2.11 requires PSK to have ≥7 bytes and be the LAST
+            // extension. Sending an empty body mid-order causes server rejection.
+            return undefined;
         case ExtensionType.SUPPORTED_VERSIONS:
             return encodeSupportedVersionsClient(config.supportedVersions);
         case ExtensionType.PSK_KEY_EXCHANGE_MODES:
@@ -316,14 +322,23 @@ function encodeExtensionBody(
     }
 }
 
-function encodeSupportedGroups(groups: readonly NamedGroup[]): Uint8Array {
+function encodeSupportedGroups(groups: readonly NamedGroup[], greaseValue?: number): Uint8Array {
     // Emit ALL offered groups verbatim — including post-quantum hybrids like
     // X25519MLKEM768 (0x11ec). They must appear in supported_groups for the
     // JA3/JA4 fingerprint to match real browsers. The crypto backend falls back
     // to the classical X25519 half if a server actually selects a hybrid.
-    const out = new Uint8Array(2 + groups.length * 2);
-    out[0] = ((groups.length * 2) >> 8) & 0xff;
-    out[1] = (groups.length * 2) & 0xff;
+    // Chrome prepends a GREASE group when grease is enabled.
+    const totalGroups = greaseValue === undefined ? groups.length : groups.length + 1;
+    const out = new Uint8Array(2 + totalGroups * 2);
+    out[0] = ((totalGroups * 2) >> 8) & 0xff;
+    out[1] = (totalGroups * 2) & 0xff;
+    let offset = 2;
+    if (greaseValue !== undefined) {
+        out[0 + offset - 2] = ((totalGroups * 2) >> 8) & 0xff; // already set above
+        out[offset] = (greaseValue >> 8) & 0xff;
+        out[offset + 1] = greaseValue & 0xff;
+        offset += 2;
+    }
     for (let i = 0; i < groups.length; i++) {
         const group = groups[i];
         if (group === undefined) {
@@ -332,8 +347,8 @@ function encodeSupportedGroups(groups: readonly NamedGroup[]): Uint8Array {
             });
         }
         const wire = namedGroupToWire(group);
-        out[2 + i * 2] = (wire >> 8) & 0xff;
-        out[2 + i * 2 + 1] = wire & 0xff;
+        out[offset + i * 2] = (wire >> 8) & 0xff;
+        out[offset + i * 2 + 1] = wire & 0xff;
     }
     return out;
 }
@@ -371,7 +386,7 @@ function encodeApplicationSettings(alpnProtocols: readonly string[] | undefined)
 }
 
 /** Default compress_certificate algorithms: brotli (0x02) only. */
-const DEFAULT_COMPRESS_ALGORITHMS: readonly number[] = [0x02];
+// DEFAULT_COMPRESS_ALGORITHMS removed — compress_certificate is now skipped.
 
 /**
  * Encode the `compress_certificate` extension body (RFC 8879) from config.
@@ -380,23 +395,9 @@ const DEFAULT_COMPRESS_ALGORITHMS: readonly number[] = [0x02];
  * lists `[0x02, 0x01, 0x03]` (brotli, zlib, zstd) — the exact ordering and set
  * are fingerprint signals, so they flow from the profile.
  */
-function encodeCompressCertificate(algorithms: readonly number[] | undefined): Uint8Array {
-    const list = algorithms ?? DEFAULT_COMPRESS_ALGORITHMS;
-    const out = new Uint8Array(1 + list.length * 2);
-    out[0] = (list.length * 2) & 0xff;
-    for (let i = 0; i < list.length; i++) {
-        const algo = list[i];
-        /* v8 ignore next 3 */
-        if (algo === undefined) {
-            throw new TlsHandshakeError("client_hello", {
-                cause: new Error(`compress certificate algorithm at index ${i} is missing`),
-            });
-        }
-        out[1 + i * 2] = (algo >> 8) & 0xff;
-        out[1 + i * 2 + 1] = algo & 0xff;
-    }
-    return out;
-}
+// encodeCompressCertificate removed — we skip the compress_certificate extension
+// because we have no certificate decompression implementation. See the
+// COMPRESS_CERTIFICATE case in encodeExtensionBody above.
 
 function encodePskKeyExchangeModes(): Uint8Array {
     return new Uint8Array([0x01, 0x01]);

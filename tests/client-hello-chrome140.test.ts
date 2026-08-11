@@ -8,8 +8,10 @@
  *      value. Before the fix, the unknown suites fell through to a default that
  *      returned undefined, silently emitting 0x0000 and getting `decode_error`.
  *   2. buildClientHelloExtensions() emits extensions in the EXACT order the
- *      profile specifies, and emits ALL of them (chrome-140 has 16). Before the
- *      fix it hardcoded 5 extensions and ignored the profile order.
+ *      profile specifies, and emits ALL of them (chrome-140 lists 16; 14 are
+ *      emitted — compress_certificate and pre_shared_key are intentionally
+ *      skipped). Before the fix it hardcoded 5 extensions and ignored the
+ *      profile order.
  *   3. GREASE values are generated when grease=true: a GREASE cipher suite at the
  *      front, a GREASE extension, and a GREASE key-share group.
  *
@@ -50,6 +52,16 @@ const CHROME140_CIPHER_SUITES = [
 const CHROME140_EXTENSION_ORDER = [
     0, 10, 11, 13, 16, 17613, 18, 23, 27, 35, 41, 43, 45, 5, 51, 65281,
 ];
+
+/**
+ * Extensions actually emitted on the wire. compress_certificate (27) and
+ * pre_shared_key (41) are intentionally skipped (no certificate decompression
+ * code; no PSK identities to offer), so they are filtered out of the emitted
+ * set even though the profile still lists them in extensionOrder.
+ */
+const CHROME140_EMITTED_EXTENSIONS = CHROME140_EXTENSION_ORDER.filter(
+    (t) => t !== ExtensionType.COMPRESS_CERTIFICATE && t !== ExtensionType.PRE_SHARED_KEY,
+);
 
 function chrome140Config(): ClientHelloConfig {
     return {
@@ -150,7 +162,7 @@ describe("Bug 1: cipherSuiteToWire maps every offered suite to a valid wire valu
     });
 });
 
-describe("Bug 2: extensions are emitted in the profile's exact order, all 16 of them", () => {
+describe("Bug 2: extensions are emitted in the profile's exact order, all of them", () => {
     it("emits extensions in the exact order chrome-140 specifies (GREASE first)", async () => {
         // Pre-fix: only 5 hardcoded extensions were emitted, in a fixed order that
         // ignored the profile entirely.
@@ -161,12 +173,13 @@ describe("Bug 2: extensions are emitted in the profile's exact order, all 16 of 
         const extensions = parseExtensions(extBlock);
         const types = extensions.map((e) => e.type);
 
-        // A GREASE sentinel is prepended ahead of the profile's 16 in order.
+        // A GREASE sentinel is prepended ahead of the profile's 14 emitted
+        // extensions in order (compress_certificate + pre_shared_key skipped).
         // Real Chrome randomizes the exact 0x?a?a value per-connection, so we
         // assert membership in the RFC 8701 set rather than a fixed value, and
         // that the remainder matches the profile order exactly.
         expect(GREASE_VALUES).toContain(types[0]);
-        expect(types.slice(1)).toEqual(CHROME140_EXTENSION_ORDER);
+        expect(types.slice(1)).toEqual(CHROME140_EMITTED_EXTENSIONS);
     });
 
     it("emits all 16 profile extensions (not just the 5 hardcoded ones)", async () => {
@@ -175,8 +188,8 @@ describe("Bug 2: extensions are emitted in the profile's exact order, all 16 of 
         const hello = buildClientHello(config, kps, () => Math.random(), crypto);
         const extBlock = extractExtensionsBlock(hello);
         const extensions = parseExtensions(extBlock);
-        // 1 GREASE + 16 profile extensions.
-        expect(extensions).toHaveLength(1 + CHROME140_EXTENSION_ORDER.length);
+        // 1 GREASE + 14 emitted profile extensions (compress_certificate + PSK skipped).
+        expect(extensions).toHaveLength(1 + CHROME140_EMITTED_EXTENSIONS.length);
     });
 
     it("honors a profile order that omits ALPN when type 16 is absent", async () => {
