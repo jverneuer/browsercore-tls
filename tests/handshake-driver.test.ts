@@ -34,6 +34,17 @@ const PROFILE: ClientHelloConfig = {
 };
 
 /**
+ * Build a raw TLS Alert record (RFC 8446 §6): content type 21 (ALERT),
+ * version 0x0303, and a 2-byte payload (alert level + description). Used to
+ * simulate a server that rejects the ClientHello with a fatal or warning alert
+ * instead of sending a ServerHello — exercising the Alert-parsing branch in
+ * runHandshake that surfaces the server's rejection reason.
+ */
+function buildAlertRecord(level: number, description: number): Uint8Array {
+    return new Uint8Array([ContentType.ALERT, 0x03, 0x03, 0x00, 0x02, level, description]);
+}
+
+/**
  * A transport that drives the server simulator: when the client writes its
  * ClientHello (a plaintext HANDSHAKE record), the simulator builds the server's
  * full flight and queues it for read(). Subsequent writes (the client's
@@ -345,5 +356,61 @@ describe("connectTls full handshake (runHandshake)", () => {
                 events: createMockEventProvider(),
             }),
         ).rejects.toThrow(/certificate_verify/);
+    });
+
+    // -----------------------------------------------------------------------
+    // Alert-parsing coverage (RFC 8446 §6).
+    //
+    // When the server rejects the ClientHello it sends a TLS Alert record
+    // (content type 21) instead of a ServerHello. The handshake driver parses
+    // the two-byte Alert payload and includes the human-readable level and
+    // description in the error message so the rejection reason is actionable.
+    // These tests exercise every branch of that parsing path.
+    // -----------------------------------------------------------------------
+
+    it("surfaces a fatal decode_error alert in the rejection message", async () => {
+        // Server sends a fatal Alert: level 2, decode_error (50). The driver
+        // must parse the Alert and include "decode_error" + "fatal" in the
+        // thrown TlsHandshakeError's cause message.
+        const sim = new TlsServerSim();
+        const transport = new HandshakeTransport(sim);
+        sim.onClientHello = (rec: Uint8Array) => {
+            void rec; // ClientHello is consumed only to trigger the response queue
+            sim.responses = [buildAlertRecord(2, 50)];
+        };
+        await expect(
+            connectTls({ transport, serverName: "example.com", profile: PROFILE, crypto, events: createMockEventProvider() }),
+        ).rejects.toThrow(/decode_error/);
+    });
+
+    it("surfaces a warning handshake_failure alert in the rejection message", async () => {
+        // Server sends a warning Alert: level 1, handshake_failure (40). The
+        // driver must include "handshake_failure" + "warning" in the message —
+        // exercising the level===1 ternary branch (distinct from fatal===2).
+        const sim = new TlsServerSim();
+        const transport = new HandshakeTransport(sim);
+        sim.onClientHello = (rec: Uint8Array) => {
+            void rec;
+            sim.responses = [buildAlertRecord(1, 40)];
+        };
+        await expect(
+            connectTls({ transport, serverName: "example.com", profile: PROFILE, crypto, events: createMockEventProvider() }),
+        ).rejects.toThrow(/handshake_failure/);
+    });
+
+    it("reports a generic handshake-record error for an unexpected content type", async () => {
+        // A content type that is neither Alert (21) nor Handshake (22) — e.g.
+        // APPLICATION_DATA (23) — must produce the generic "expected handshake
+        // record" error rather than attempting Alert parsing.
+        const sim = new TlsServerSim();
+        const transport = new HandshakeTransport(sim);
+        sim.onClientHello = (rec: Uint8Array) => {
+            void rec;
+            // APPLICATION_DATA record with a single zero-length fragment.
+            sim.responses = [new Uint8Array([ContentType.APPLICATION_DATA, 0x03, 0x03, 0x00, 0x00])];
+        };
+        await expect(
+            connectTls({ transport, serverName: "example.com", profile: PROFILE, crypto, events: createMockEventProvider() }),
+        ).rejects.toThrow(/expected handshake record/);
     });
 });
