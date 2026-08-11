@@ -170,21 +170,6 @@ export class TlsKeyScheduleError extends Error {
     }
 }
 
-/** A TLS profile name could not be resolved. */
-export class TlsProfileError extends Error {
-    public readonly kind = "TlsProfileError" as const;
-    /** The unresolved profile name. Named `profile` (not `name`) to avoid shadowing `Error.name`. */
-    public readonly profile: string;
-    public override readonly cause: Error | undefined;
-
-    constructor(profile: string, options?: { cause?: Error }) {
-        super(`unknown TLS profile: ${profile}`);
-        this.name = "TlsProfileError";
-        this.profile = profile;
-        this.cause = options?.cause;
-    }
-}
-
 /** Narrow a caught error to a typed TLS error, or wrap it in {@link TlsError}. */
 export function ensureTlsError(e: unknown): TlsError {
     if (e instanceof TlsError) {

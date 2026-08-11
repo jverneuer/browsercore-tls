@@ -62,7 +62,6 @@ import type {
 } from "../src/index.js";
 import type { TlsExtension } from "../src/index.js";
 import type { Certificate, CertificateChain, TrustAnchor } from "../src/index.js";
-import type { TlsProfile } from "../src/index.js";
 import type { HandshakePhase, AlertLevel } from "../src/index.js";
 
 describe("barrel re-exports (values)", () => {
@@ -148,7 +147,6 @@ describe("barrel re-exports (types)", () => {
         types.cert = null as unknown as Certificate;
         types.chain = null as unknown as CertificateChain;
         types.ta = null as unknown as TrustAnchor;
-        types.profile = null as unknown as TlsProfile;
         types.hp = null as unknown as HandshakePhase;
         types.al = null as unknown as AlertLevel;
         expect(Object.keys(types).length).toBeGreaterThan(0);

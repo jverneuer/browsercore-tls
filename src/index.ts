@@ -46,8 +46,6 @@ export {
 // cipher suites to QUIC AEAD algorithms.
 export type { AeadAlgorithm } from "./types.js";
 
-export { type TlsProfile, MODERN_TLS13_PROFILE, COMPATIBILITY_PROFILE, getProfile, resolveProfile } from "./profiles/profiles.js";
-
 export {
     ContentType,
     parseRecordHeader,
