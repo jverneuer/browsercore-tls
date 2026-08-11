@@ -177,9 +177,11 @@ describe("Bug 2: extensions are emitted in the profile's exact order, all of the
         // extensions in order (compress_certificate + pre_shared_key skipped).
         // Real Chrome randomizes the exact 0x?a?a value per-connection, so we
         // assert membership in the RFC 8701 set rather than a fixed value, and
-        // that the remainder matches the profile order exactly.
+        // that the remainder matches the profile order exactly. A trailing
+        // GREASE sentinel terminates the list (same per-connection value).
         expect(GREASE_VALUES).toContain(types[0]);
-        expect(types.slice(1)).toEqual(CHROME140_EMITTED_EXTENSIONS);
+        expect(GREASE_VALUES).toContain(types[types.length - 1]);
+        expect(types.slice(1, -1)).toEqual(CHROME140_EMITTED_EXTENSIONS);
     });
 
     it("emits all 16 profile extensions (not just the 5 hardcoded ones)", async () => {
@@ -188,8 +190,9 @@ describe("Bug 2: extensions are emitted in the profile's exact order, all of the
         const hello = buildClientHello(config, kps, () => Math.random(), crypto);
         const extBlock = extractExtensionsBlock(hello);
         const extensions = parseExtensions(extBlock);
-        // 1 GREASE + 14 emitted profile extensions (compress_certificate + PSK skipped).
-        expect(extensions).toHaveLength(1 + CHROME140_EMITTED_EXTENSIONS.length);
+        // 2 GREASE (leading + trailing, RFC 8701) + 14 emitted profile extensions
+        // (compress_certificate + PSK skipped).
+        expect(extensions).toHaveLength(2 + CHROME140_EMITTED_EXTENSIONS.length);
     });
 
     it("honors a profile order that omits ALPN when type 16 is absent", async () => {
