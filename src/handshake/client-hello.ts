@@ -242,12 +242,24 @@ function buildClientHelloExtensions(
 
     // RFC 8701: Chrome appends a trailing GREASE extension as the absolute last
     // extension on the wire (after padding). It reuses the same 0x?a?a sentinel
-    // as the leading GREASE cipher suite / extension / key-share. Real browsers
-    // terminate the extension list on a GREASE value; omitting it is a
-    // fingerprint mismatch against Chrome/Edge/Safari. Firefox (grease=false)
-    // never emits it.
+    // set but uses a DIFFERENT value than the leading GREASE — RFC 8446 §4.2
+    // forbids duplicate extension types, so both GREASE extensions must have
+    // different type values.
     if (config.grease && greaseValue !== 0) {
-        parts.push(wrapExtension(greaseValue, new Uint8Array(0)));
+        // Generate a second GREASE value, retrying if it matches the first
+        let trailingGrease = greaseValue;
+        for (let i = 0; i < 16 && trailingGrease === greaseValue; i++) {
+            const bytes = provider.randomBytes(1);
+            const raw: number = bytes.length > 0 ? (bytes[0] ?? 0) : 0;
+            const idx = Math.floor(raw / 256 * GREASE_VALUES.length);
+            trailingGrease = GREASE_VALUES[idx] ?? greaseValue;
+        }
+        if (trailingGrease === greaseValue) {
+            // Fallback: pick the next GREASE value in the list
+            const idx = GREASE_VALUES.indexOf(greaseValue);
+            trailingGrease = GREASE_VALUES[(idx + 1) % GREASE_VALUES.length] ?? greaseValue;
+        }
+        parts.push(wrapExtension(trailingGrease, new Uint8Array(0)));
     }
 
     let total = 0;

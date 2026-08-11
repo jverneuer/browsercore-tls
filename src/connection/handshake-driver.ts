@@ -190,6 +190,30 @@ export async function runHandshake(
     const shRecord = await readRawRecord(ctx.readBuffer, ctx.transport, shHeader, ctx.onDebug);
     ctx.readBuffer = shRecord.readBuffer;
     if (shRecord.type !== ContentType.HANDSHAKE) {
+        // Parse Alert to show the server's rejection reason
+        if (shRecord.type === 21 && shRecord.fragment.length >= 2) {
+            const alertLevel = shRecord.fragment[0]; // 1=warning, 2=fatal
+            const alertDesc = shRecord.fragment[1];  // RFC 8446 §6
+            const alertNames: Record<number, string> = {
+                0: "close_notify", 10: "unexpected_message", 20: "bad_record_mac",
+                40: "handshake_failure", 41: "bad_certificate", 43: "unsupported_certificate",
+                44: "certificate_revoked", 45: "certificate_expired", 47: "illegal_parameter",
+                48: "unknown_ca", 49: "access_denied", 50: "decode_error", 51: "decrypt_error",
+                70: "protocol_version", 71: "insufficient_security", 80: "internal_error",
+                86: "inappropriate_fallback", 90: "user_canceled", 100: "missing_extension",
+                109: "missing_extension", 110: "unsupported_extension", 111: "certificate_unobtainable",
+                112: "unrecognized_name", 113: "bad_certificate_status_response",
+                114: "unknown_psk_identity", 115: "certificate_required",
+            };
+            const levelStr = alertLevel === 2 ? "fatal" : alertLevel === 1 ? "warning" : `level=${alertLevel}`;
+            const descStr = alertDesc === undefined ? "unknown" : (alertNames[alertDesc] ?? `unknown(${alertDesc})`);
+            throw new TlsHandshakeError("server_hello", {
+                cause: new Error(
+                    `server sent TLS Alert: ${levelStr} ${descStr} (${alertDesc}). ` +
+                    `The server rejected our ClientHello.`,
+                ),
+            });
+        }
         throw new TlsHandshakeError("server_hello", {
             cause: new Error(`expected handshake record, got content type ${shRecord.type}`),
         });

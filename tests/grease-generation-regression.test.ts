@@ -162,9 +162,8 @@ describe("Every ClientHello (grease=true) contains a GREASE extension", () => {
         const extensions = parseExtensions(hello);
         const types = extensions.map((e) => e.type);
         expect(types[0]).toBe(CANONICAL_GREASE);
-        // A trailing GREASE sentinel (RFC 8701) terminates the list with the
-        // same per-connection value as the leading one.
-        expect(types[types.length - 1]).toBe(CANONICAL_GREASE);
+        // A trailing GREASE sentinel terminates the list with a DIFFERENT value.
+        expect(types[types.length - 1]).not.toBe(CANONICAL_GREASE);
         expect(types.slice(1, -1)).toEqual([0, 10, 13, 43, 51]);
     });
 });
@@ -248,9 +247,8 @@ describe("Trailing GREASE extension (grease=true)", () => {
         const last = extensions[extensions.length - 1];
         expect(last).toBeDefined();
         expect(isGreasePattern(last!.type)).toBe(true);
-        // Reuses the same per-connection sentinel as the leading GREASE.
-        expect(last!.type).toBe(CANONICAL_GREASE);
-        expect(last!.type).toBe(extensions[0]!.type);
+        // Trailing GREASE uses a DIFFERENT value than leading (avoids duplicate extension types)
+        expect(last!.type).not.toBe(extensions[0]!.type);
     });
 
     it("the trailing GREASE extension body is empty", async () => {
@@ -260,12 +258,17 @@ describe("Trailing GREASE extension (grease=true)", () => {
         expect(last.data.length).toBe(0);
     });
 
-    it("reuses the same sentinel for leading and trailing GREASE", async () => {
-        // random()=0.5 -> MID_GREASE (0x8a8a) in both leading and trailing slots.
+    it("uses a DIFFERENT sentinel for trailing GREASE (avoids duplicate extension types)", async () => {
+        // RFC 8446 §4.2 forbids duplicate extension types. Chrome uses a
+        // different GREASE value for the trailing extension to avoid this.
         const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.5, crypto);
         const extensions = parseExtensions(hello);
-        expect(extensions[0]!.type).toBe(0x8a8a);
-        expect(extensions[extensions.length - 1]!.type).toBe(0x8a8a);
+        const leading = extensions[0]!.type;
+        const trailing = extensions[extensions.length - 1]!.type;
+        expect(isGreasePattern(leading)).toBe(true);
+        expect(isGreasePattern(trailing)).toBe(true);
+        // Must be different to avoid duplicate extension type
+        expect(leading).not.toBe(trailing);
     });
 
     it("does NOT append a trailing GREASE extension when grease=false", async () => {
@@ -324,5 +327,26 @@ describe("supported_versions advertises TLS 1.2 even when grease=false", () => {
         expect(sv).toBeDefined();
         // Exactly one TLS 1.3 and one TLS 1.2 — no duplication.
         expect(Array.from(sv!.data)).toEqual([0x04, 0x03, 0x04, 0x03, 0x03]);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Trailing GREASE fallback coverage
+// ---------------------------------------------------------------------------
+
+describe("Trailing GREASE fallback when random returns same value", () => {
+    it("uses fallback when all random bytes produce the same GREASE value", async () => {
+        // Provider that always returns 0x00 bytes, mapping to GREASE index 0 (0x0a0a).
+        // This forces the fallback path since all 16 retries produce the same value.
+        const stuckProvider = {
+            ...crypto,
+            randomBytes: (n: number) => new Uint8Array(n), // all zeros
+        };
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0, stuckProvider);
+        const extensions = parseExtensions(hello);
+        const leading = extensions[0]!.type;
+        const trailing = extensions[extensions.length - 1]!.type;
+        expect(isGreasePattern(trailing)).toBe(true);
+        expect(trailing).not.toBe(leading);
     });
 });
