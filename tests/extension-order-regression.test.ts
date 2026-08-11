@@ -115,9 +115,10 @@ describe("Extensions appear in the exact order specified by the profile", () => 
         const hello = buildClientHello(baseConfig(order, true), await x25519KeyPair(), () => 0.0, crypto);
         const types = parseExtensionTypes(hello);
         expect(types[0]).toBe(0x0a0a);
-        // A trailing GREASE sentinel (RFC 8701) terminates the list with the
-        // same per-connection value as the leading one.
-        expect(types[types.length - 1]).toBe(0x0a0a);
+        // A trailing GREASE sentinel (RFC 8701) terminates the list with a
+        // DIFFERENT value to avoid duplicate extension types (RFC 8446 §4.2).
+        expect(types[types.length - 1]).not.toBe(0x0a0a);
+        // The middle extensions match the profile order.
         expect(types.slice(1, -1)).toEqual([...order]);
     });
 
