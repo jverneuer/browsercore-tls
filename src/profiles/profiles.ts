@@ -34,7 +34,7 @@ export const MODERN_TLS13_PROFILE: TlsProfile = {
             "TLS_CHACHA20_POLY1305_SHA256",
         ],
         extensionOrder: [
-            0, 10, 11, 13, 16, 17613, 18, 23, 35, 41, 43, 45, 5, 51, 65281,
+            0, 10, 11, 13, 16, 17613, 18, 23, 35, 43, 45, 5, 51, 65281,
         ],
         keyShareGroups: ["x25519", "secp256r1"],
         signatureAlgorithms: [
@@ -63,7 +63,7 @@ export const COMPATIBILITY_PROFILE: TlsProfile = {
             "TLS_CHACHA20_POLY1305_SHA256",
         ],
         // Firefox-128 style order: no GREASE, no session_ticket/renegotiation_info.
-        extensionOrder: [0, 10, 11, 13, 16, 18, 23, 35, 41, 43, 45, 51, 65281],
+        extensionOrder: [0, 10, 11, 13, 16, 18, 23, 35, 43, 45, 51, 65281],
         keyShareGroups: ["x25519", "secp256r1", "secp384r1"],
         signatureAlgorithms: [
             "ecdsa_secp256r1_sha256",
