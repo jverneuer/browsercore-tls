@@ -240,6 +240,16 @@ function buildClientHelloExtensions(
         parts.push(wrapExtension(ExtensionType.PADDING, new Uint8Array(paddingAmount)));
     }
 
+    // RFC 8701: Chrome appends a trailing GREASE extension as the absolute last
+    // extension on the wire (after padding). It reuses the same 0x?a?a sentinel
+    // as the leading GREASE cipher suite / extension / key-share. Real browsers
+    // terminate the extension list on a GREASE value; omitting it is a
+    // fingerprint mismatch against Chrome/Edge/Safari. Firefox (grease=false)
+    // never emits it.
+    if (config.grease && greaseValue !== 0) {
+        parts.push(wrapExtension(greaseValue, new Uint8Array(0)));
+    }
+
     let total = 0;
     for (const p of parts) {
         total += p.length;
@@ -301,7 +311,10 @@ function encodeExtensionBody(
             // extension. Sending an empty body mid-order causes server rejection.
             return undefined;
         case ExtensionType.SUPPORTED_VERSIONS:
-            return encodeSupportedVersionsClient(config.supportedVersions);
+            return encodeSupportedVersionsClient(
+                config.supportedVersions,
+                config.grease ? greaseValue : undefined,
+            );
         case ExtensionType.PSK_KEY_EXCHANGE_MODES:
             return encodePskKeyExchangeModes();
         case ExtensionType.KEY_SHARE:
@@ -454,9 +467,17 @@ function encodeServerNameList(serverName: string): Uint8Array {
     return out;
 }
 
-function encodeSupportedVersionsClient(versions: readonly ProtocolVersion[]): Uint8Array {
-    const out = new Uint8Array(1 + versions.length * 2);
-    out[0] = (versions.length * 2) & 0xff;
+function encodeSupportedVersionsClient(versions: readonly ProtocolVersion[], greaseValue?: number): Uint8Array {
+    // Chrome advertises [GREASE, TLS 1.3, TLS 1.2] in supported_versions. The
+    // leading GREASE version (0x?a?a) reuses the per-connection sentinel drawn
+    // for the rest of this ClientHello. TLS 1.2 (0x0303) is appended for
+    // middlebox compatibility even though the handshake only negotiates TLS 1.3:
+    // omitting it is a fingerprint signal that distinguishes this client from
+    // real Chrome, and some middleboxes force a downgrade when 1.2 is absent.
+    const allVersions: number[] = [];
+    if (greaseValue !== undefined) {
+        allVersions.push(greaseValue);
+    }
     for (let i = 0; i < versions.length; i++) {
         const version = versions[i];
         if (version === undefined) {
@@ -464,7 +485,21 @@ function encodeSupportedVersionsClient(versions: readonly ProtocolVersion[]): Ui
                 cause: new Error(`supported version at index ${i} is missing`),
             });
         }
-        const wire = version.wire;
+        allVersions.push(version.wire);
+    }
+    if (!allVersions.includes(TLS_1_2_WIRE_VERSION)) {
+        allVersions.push(TLS_1_2_WIRE_VERSION);
+    }
+    const out = new Uint8Array(1 + allVersions.length * 2);
+    out[0] = (allVersions.length * 2) & 0xff;
+    for (let i = 0; i < allVersions.length; i++) {
+        const wire = allVersions[i];
+        /* v8 ignore next 3 */
+        if (wire === undefined) {
+            throw new TlsHandshakeError("client_hello", {
+                cause: new Error(`supported version wire at index ${i} is missing`),
+            });
+        }
         out[1 + i * 2] = (wire >> 8) & 0xff;
         out[1 + i * 2 + 1] = wire & 0xff;
     }

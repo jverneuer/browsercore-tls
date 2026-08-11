@@ -22,7 +22,7 @@ import { createTestCryptoProvider } from "./test-helpers.js";
 const crypto = createTestCryptoProvider();
 import { buildClientHello } from "../src/handshake/client-hello.js";
 import { ExtensionType } from "../src/extensions/extensions.js";
-import { TLS_1_3 } from "../src/types.js";
+import { TLS_1_2, TLS_1_3 } from "../src/types.js";
 import type { ClientHelloConfig, KeyPair } from "../src/types.js";
 
 /** RFC 8701 §2: every GREASE value has identical bytes with low nibble 0xA. */
@@ -162,7 +162,10 @@ describe("Every ClientHello (grease=true) contains a GREASE extension", () => {
         const extensions = parseExtensions(hello);
         const types = extensions.map((e) => e.type);
         expect(types[0]).toBe(CANONICAL_GREASE);
-        expect(types.slice(1)).toEqual([0, 10, 13, 43, 51]);
+        // A trailing GREASE sentinel (RFC 8701) terminates the list with the
+        // same per-connection value as the leading one.
+        expect(types[types.length - 1]).toBe(CANONICAL_GREASE);
+        expect(types.slice(1, -1)).toEqual([0, 10, 13, 43, 51]);
     });
 });
 
@@ -229,5 +232,97 @@ describe("No GREASE is generated when grease=false (Firefox-style)", () => {
         expect(firstGroup).not.toBe(CANONICAL_GREASE);
         expect(isGreasePattern(firstGroup)).toBe(false);
         expect(firstGroup).toBe(0x001d); // x25519, the first real group
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Trailing GREASE extension (RFC 8701) — Chrome parity.
+// Real browsers terminate the extension list with a GREASE value that reuses
+// the same per-connection sentinel as the leading GREASE.
+// ---------------------------------------------------------------------------
+
+describe("Trailing GREASE extension (grease=true)", () => {
+    it("appends a GREASE extension as the absolute last extension", async () => {
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0, crypto);
+        const extensions = parseExtensions(hello);
+        const last = extensions[extensions.length - 1];
+        expect(last).toBeDefined();
+        expect(isGreasePattern(last!.type)).toBe(true);
+        // Reuses the same per-connection sentinel as the leading GREASE.
+        expect(last!.type).toBe(CANONICAL_GREASE);
+        expect(last!.type).toBe(extensions[0]!.type);
+    });
+
+    it("the trailing GREASE extension body is empty", async () => {
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => Math.random(), crypto);
+        const extensions = parseExtensions(hello);
+        const last = extensions[extensions.length - 1]!;
+        expect(last.data.length).toBe(0);
+    });
+
+    it("reuses the same sentinel for leading and trailing GREASE", async () => {
+        // random()=0.5 -> MID_GREASE (0x8a8a) in both leading and trailing slots.
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.5, crypto);
+        const extensions = parseExtensions(hello);
+        expect(extensions[0]!.type).toBe(0x8a8a);
+        expect(extensions[extensions.length - 1]!.type).toBe(0x8a8a);
+    });
+
+    it("does NOT append a trailing GREASE extension when grease=false", async () => {
+        const hello = buildClientHello({ ...greasedConfig(), grease: false }, await x25519KeyPair(), () => Math.random(), crypto);
+        const extensions = parseExtensions(hello);
+        const last = extensions[extensions.length - 1]!;
+        expect(isGreasePattern(last.type)).toBe(false);
+        // The last extension is key_share (51), not a GREASE value.
+        expect(last.type).toBe(ExtensionType.KEY_SHARE);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// supported_versions: [GREASE, TLS 1.3, TLS 1.2] — Chrome parity.
+// Chrome advertises a leading GREASE version and always appends TLS 1.2 for
+// middlebox compatibility, even though the handshake negotiates TLS 1.3.
+// ---------------------------------------------------------------------------
+
+describe("supported_versions advertises GREASE + TLS 1.2 (grease=true)", () => {
+    it("encodes [GREASE(0x0a0a), TLS 1.3(0x0304), TLS 1.2(0x0303)]", async () => {
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0, crypto);
+        const extensions = parseExtensions(hello);
+        const sv = extensions.find((e) => e.type === ExtensionType.SUPPORTED_VERSIONS);
+        expect(sv).toBeDefined();
+        // Body: 1-byte length (6) || GREASE || TLS 1.3 || TLS 1.2.
+        expect(Array.from(sv!.data)).toEqual([0x06, 0x0a, 0x0a, 0x03, 0x04, 0x03, 0x03]);
+    });
+
+    it("the leading GREASE version reuses the per-connection sentinel", async () => {
+        // random()=0.5 -> MID_GREASE (0x8a8a).
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.5, crypto);
+        const extensions = parseExtensions(hello);
+        const sv = extensions.find((e) => e.type === ExtensionType.SUPPORTED_VERSIONS)!;
+        const firstVersion = ((sv.data[1] ?? 0) << 8) | (sv.data[2] ?? 0);
+        expect(firstVersion).toBe(0x8a8a);
+    });
+});
+
+describe("supported_versions advertises TLS 1.2 even when grease=false", () => {
+    it("encodes [TLS 1.3(0x0304), TLS 1.2(0x0303)] with no GREASE", async () => {
+        const hello = buildClientHello({ ...greasedConfig(), grease: false }, await x25519KeyPair(), () => Math.random(), crypto);
+        const extensions = parseExtensions(hello);
+        const sv = extensions.find((e) => e.type === ExtensionType.SUPPORTED_VERSIONS);
+        expect(sv).toBeDefined();
+        // Body: 1-byte length (4) || TLS 1.3 || TLS 1.2. No GREASE version.
+        expect(Array.from(sv!.data)).toEqual([0x04, 0x03, 0x04, 0x03, 0x03]);
+    });
+
+    it("does not duplicate TLS 1.2 when the profile already lists it", async () => {
+        // A profile that already advertises TLS 1.2 must not get a second copy
+        // appended — the dedup guard (`!allVersions.includes(0x0303)`) fires.
+        const cfg: ClientHelloConfig = { ...greasedConfig(), grease: false, supportedVersions: [TLS_1_3, TLS_1_2] };
+        const hello = buildClientHello(cfg, await x25519KeyPair(), () => Math.random(), crypto);
+        const extensions = parseExtensions(hello);
+        const sv = extensions.find((e) => e.type === ExtensionType.SUPPORTED_VERSIONS);
+        expect(sv).toBeDefined();
+        // Exactly one TLS 1.3 and one TLS 1.2 — no duplication.
+        expect(Array.from(sv!.data)).toEqual([0x04, 0x03, 0x04, 0x03, 0x03]);
     });
 });
