@@ -404,6 +404,13 @@ async function consumeServerFlight(
     ctx.currentPhase = "certificate";
     ctx.onDebug?.("consumeServerFlight: expecting Certificate");
     message = await nextHandshakeMessage();
+    if (message.whole[0] !== HandshakeType.CERTIFICATE) {
+        throw new TlsHandshakeError("certificate", {
+            cause: new Error(
+                `expected Certificate (type ${HandshakeType.CERTIFICATE}), got handshake type ${message.whole[0]}`,
+            ),
+        });
+    }
     phase = advanceHandshake(phase, HandshakeType.CERTIFICATE);
     ctx.transcript.push(message.whole);
     const chain = await validateCertificateChain(message.body, serverName, trustAnchors, now, ctx.crypto);

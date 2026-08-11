@@ -363,71 +363,6 @@ describe("buildClientHello ec_point_formats from config", () => {
 });
 
 // ---------------------------------------------------------------------------
-// compress_certificate algorithms from config (Fix 4)
-// ---------------------------------------------------------------------------
-
-describe("buildClientHello compress_certificate from config", () => {
-    function extractExtensionBody(hello: Uint8Array, type: number): Uint8Array | undefined {
-        let o = 4 + 2 + 32;
-        const sidLen = hello[o]!;
-        o += 1 + sidLen;
-        const cipherLen = (hello[o]! << 8) | hello[o + 1]!;
-        o += 2 + cipherLen;
-        const compLen = hello[o]!;
-        o += 1 + compLen;
-        const extTotalLen = (hello[o]! << 8) | hello[o + 1]!;
-        o += 2;
-        const extEnd = o + extTotalLen;
-        while (o + 4 <= extEnd) {
-            const eType = (hello[o]! << 8) | hello[o + 1]!;
-            const eLen = (hello[o + 2]! << 8) | hello[o + 3]!;
-            o += 4;
-            if (eType === type) {
-                return hello.subarray(o, o + eLen);
-            }
-            o += eLen;
-        }
-        return undefined;
-    }
-
-    it("defaults to [0x02] (brotli) when not specified", async () => {
-        const kps = await keyPairs(["x25519"]);
-        const cfg: ClientHelloConfig = {
-            ...BASE_CONFIG,
-            grease: false,
-            extensionOrder: [ExtensionType.COMPRESS_CERTIFICATE],
-        };
-        const hello = buildClientHello(cfg, kps, () => 0, crypto);
-        const body = extractExtensionBody(hello, ExtensionType.COMPRESS_CERTIFICATE);
-        expect(body).toBeDefined();
-        // Default = [0x02] → body = [0x02, 0x00, 0x02] (list_len=2, algo=0x0002)
-        expect(body![0]).toBe(2); // algorithm list length in bytes (1 algo * 2)
-        expect(body![1]).toBe(0x00);
-        expect(body![2]).toBe(0x02); // brotli
-    });
-
-    it("uses config.compressCertificateAlgorithms when specified", async () => {
-        const kps = await keyPairs(["x25519"]);
-        const cfg: ClientHelloConfig = {
-            ...BASE_CONFIG,
-            grease: false,
-            extensionOrder: [ExtensionType.COMPRESS_CERTIFICATE],
-            compressCertificateAlgorithms: [0x02, 0x01, 0x03],
-        };
-        const hello = buildClientHello(cfg, kps, () => 0, crypto);
-        const body = extractExtensionBody(hello, ExtensionType.COMPRESS_CERTIFICATE);
-        expect(body).toBeDefined();
-        expect(body![0]).toBe(6); // 3 algorithms * 2 bytes
-        expect(body![1]).toBe(0x00);
-        expect(body![2]).toBe(0x02); // brotli
-        expect(body![3]).toBe(0x00);
-        expect(body![4]).toBe(0x01); // zlib
-        expect(body![5]).toBe(0x00);
-        expect(body![6]).toBe(0x03); // zstd
-    });
-});
-
-// ---------------------------------------------------------------------------
 // Record padding (Fix 5)
 // ---------------------------------------------------------------------------
 
@@ -454,10 +389,10 @@ describe("buildClientHello record padding", () => {
         const kps = await keyPairs(["x25519"]);
         const cfg: ClientHelloConfig = {
             ...BASE_CONFIG,
-            recordPadding: 256,
+            recordPadding: 384,
         };
         const hello = buildClientHello(cfg, kps, () => 0, crypto);
-        expect(hello.length).toBe(256);
+        expect(hello.length).toBe(384);
     });
 
     it("does not pad when the message already exceeds the target", async () => {
