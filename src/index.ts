@@ -79,6 +79,9 @@ export type { TlsExtension } from "./extensions/extensions.js";
 export { parseCertificate, validateHostname, verifyChain, pemToDer } from "./certificates/certificates.js";
 export type { Certificate, CertificateChain, TrustAnchor } from "./certificates/certificates.js";
 
+export { SessionCache } from "./session/session-cache.js";
+export type { ResumptionTicket } from "./session/session-cache.js";
+
 export {
     hkdfExpandLabel,
     deriveHandshakeSecrets,

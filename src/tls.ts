@@ -44,7 +44,6 @@ import { TlsHandshakeError, TlsDecryptError, AlertDescription, ensureTlsError, t
 import { createId } from "./utils.js";
 import { ContentType, type encryptRecord } from "./record/record.js";
 import { HandshakeType, type ServerHello } from "./handshake/handshake.js";
-import type { Certificate } from "./certificates/certificates.js";
 import {
     ensureOpen,
     handleAlert as handleAlertRecord,
@@ -54,8 +53,10 @@ import {
     runHandshake,
     splitHandshakeMessages,
     updateTrafficSecrets,
+    type Certificate,
     type HandshakeContext,
 } from "./connection/index.js";
+import { SessionCache, parseNewSessionTicket, type ResumptionTicket } from "./session/session-cache.js";
 
 /** Default handshake timeout in milliseconds. */
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
@@ -85,13 +86,23 @@ export function generateKeyShares(groups: readonly string[], provider: CryptoPro
         for (const group of groups) {
             switch (group) {
                 // Post-quantum hybrid groups (RFC 8446 §4.2.7 + hybrid design).
-                // Advertised in supported_groups but we send the classical
-                // X25519 key_share — matching real Chrome hybrid mode. The
-                // server combines it with its own PQ share if it supports the
-                // hybrid group, so no separate PQ key pair is generated here.
-                // These empty cases fall through to the x25519 case below.
+                // The crypto backend has no PQ support, so we generate a
+                // classical X25519 key but TAG it with the hybrid group name.
+                // This lets the key_share extension emit the correct group ID
+                // (0x11ec for X25519MLKEM768) for fingerprint compatibility.
+                // The server will typically select regular X25519 for the
+                // actual exchange; if it selects the hybrid, computeSharedSecret
+                // falls back to the X25519 half.
                 case "X25519Kyber768":
-                case "X25519MLKEM768":
+                case "X25519MLKEM768": {
+                    const kp = provider.x25519GenerateKeyPair();
+                    shares.push({
+                        algorithm: group as KeyPair["algorithm"],
+                        privateKey: kp.secretKey,
+                        publicKey: kp.publicKey,
+                    });
+                    break;
+                }
                 case "Secp256r1MLKEM768":
                 case "Secp384r1MLKEM1024":
                 case "x25519": {
@@ -177,6 +188,13 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
     public currentPhase: HandshakePhase = "init";
     /** Optional debug trace callback, set from TlsOptions.onDebug. */
     public onDebug: ((msg: string) => void) | undefined;
+
+    /**
+     * Session resumption cache. Stores parsed NewSessionTicket messages and
+     * their derived PSKs so a future connection to the same host can offer
+     * PSK-based resumption. Lazily populated post-handshake.
+     */
+    private readonly sessionCache = new SessionCache();
 
     private applicationSecrets!: ApplicationTrafficSecrets;
     private clientAppSeq = 0;
@@ -546,8 +564,8 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
 
     /**
      * Split a decrypted post-handshake handshake record into individual messages
-     * and dispatch each by type. KeyUpdate rotates traffic keys; all other types
-     * (NewSessionTicket, post-handshake CertificateRequest) are silently ignored.
+     * and dispatch each by type. KeyUpdate rotates traffic keys; NewSessionTicket
+     * is parsed and stored in the session cache for future resumption.
      */
     private async handlePostHandshakeMessage(content: Uint8Array): Promise<void> {
         const messages = splitHandshakeMessages(content);
@@ -556,10 +574,39 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
             if (typeByte === HandshakeType.KEY_UPDATE) {
                 // eslint-disable-next-line no-await-in-loop
                 await this.handleKeyUpdate(msg.subarray(4));
+            } else if (typeByte === HandshakeType.NEW_SESSION_TICKET) {
+                this.handleNewSessionTicket(msg.subarray(4));
             }
-            // Other post-handshake message types are ignored — they do not
-            // affect the connection's traffic keys or state.
         }
+    }
+
+    /**
+     * Parse a NewSessionTicket (RFC 8446 §4.6.1) and store the derived PSK.
+     *
+     * Delegates parsing and PSK derivation to {@link parseNewSessionTicket};
+     * the result is stored in the session cache keyed by the server name.
+     * Storage only — the PSK is not yet offered in a subsequent ClientHello.
+     */
+    private handleNewSessionTicket(body: Uint8Array): void {
+        const result = parseNewSessionTicket(
+            body,
+            this.masterSecret,
+            this.transcript,
+            this.hash,
+            this.cipherSuite,
+            this.serverName,
+            this.clock.now(),
+            this.crypto,
+        );
+        if (result === undefined) {
+            this.onDebug?.("NewSessionTicket: malformed body, ignoring");
+            return;
+        }
+        this.sessionCache.store(result.serverName, result.ticket);
+        this.onDebug?.(
+            `NewSessionTicket: stored resumption ticket for "${result.serverName}" ` +
+            `(ticket_len=${result.ticket.ticket.length}, max_early_data=${result.ticket.maxEarlyDataSize})`,
+        );
     }
 
     /**
@@ -620,5 +667,14 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
 
     private transition(next: TlsState): void {
         this.state = next;
+    }
+
+    /**
+     * Retrieve a cached resumption ticket for the given server name, or
+     * undefined if no NewSessionTicket has been received for this connection.
+     * Used by higher layers to offer PSK-based session resumption.
+     */
+    public getResumptionTicket(serverName: string): ResumptionTicket | undefined {
+        return this.sessionCache.get(serverName);
     }
 }

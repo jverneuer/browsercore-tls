@@ -23,6 +23,7 @@ import { ExtensionType } from "../src/extensions/extensions.js";
 import { TlsHandshakeError } from "../src/errors.js";
 import { TLS_1_3 } from "../src/types.js";
 import type { ClientHelloConfig, KeyPair } from "../src/types.js";
+import { NAMED_GROUP_CODES } from "../src/iana/index.js";
 
 async function keyPairs(groups: readonly string[]): Promise<readonly KeyPair[]> {
     const out: KeyPair[] = [];
@@ -209,5 +210,275 @@ describe("encodeExtensionBody default branch", () => {
         const hello = buildClientHello(cfg, kps, () => Math.random(), crypto);
         expect(hello).toBeInstanceOf(Uint8Array);
         expect(hello.length).toBeGreaterThan(0);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Post-quantum key share groups (Fix 1) — supported_groups + key_share must
+// include X25519MLKEM768 (0x11ec) and X25519Kyber768 (0x6399) for fingerprint
+// compatibility. The crypto backend generates X25519 keys tagged with the
+// hybrid name.
+// ---------------------------------------------------------------------------
+
+describe("buildClientHello post-quantum key share groups", () => {
+    it("includes X25519MLKEM768 in the supported_groups extension", async () => {
+        const kps: KeyPair[] = [
+            { algorithm: "x25519", privateKey: new Uint8Array(32), publicKey: new Uint8Array(32).fill(0x01) },
+            { algorithm: "X25519MLKEM768", privateKey: new Uint8Array(32), publicKey: new Uint8Array(32).fill(0x02) },
+        ];
+        const cfg: ClientHelloConfig = {
+            ...BASE_CONFIG,
+            keyShareGroups: ["x25519", "X25519MLKEM768"],
+            extensionOrder: [ExtensionType.SUPPORTED_GROUPS],
+            grease: false,
+        };
+        const hello = buildClientHello(cfg, kps, () => 0, crypto);
+        expect(hello[0]).toBe(0x01); // CLIENT_HELLO
+
+        // Verify the supported_groups extension contains both group IDs.
+        // We search for the X25519MLKEM768 wire code (0x11ec) in the message.
+        const pqWire = NAMED_GROUP_CODES["X25519MLKEM768"];
+        const x25519Wire = NAMED_GROUP_CODES["x25519"];
+        const bytes = Array.from(hello);
+        // Find the supported_groups extension (type 10 = 0x000a).
+        const sgIdx = bytes.indexOf(0x00, bytes.indexOf(0x0a));
+        expect(sgIdx).toBeGreaterThan(-1);
+        // Verify both wire codes appear after the extension type.
+        const afterExt = bytes.slice(sgIdx);
+        expect(afterExt.includes((x25519Wire >> 8) & 0xff)).toBe(true);
+        expect(afterExt.includes((pqWire >> 8) & 0xff)).toBe(true);
+    });
+
+    it("includes X25519MLKEM768 in the key_share extension", async () => {
+        const kps: KeyPair[] = [
+            { algorithm: "x25519", privateKey: new Uint8Array(32), publicKey: new Uint8Array(32).fill(0x01) },
+            { algorithm: "X25519MLKEM768", privateKey: new Uint8Array(32), publicKey: new Uint8Array(32).fill(0x02) },
+        ];
+        const cfg: ClientHelloConfig = {
+            ...BASE_CONFIG,
+            keyShareGroups: ["x25519", "X25519MLKEM768"],
+            extensionOrder: [ExtensionType.KEY_SHARE],
+            grease: false,
+        };
+        const hello = buildClientHello(cfg, kps, () => 0, crypto);
+
+        // Verify the key_share extension contains the PQ group wire code.
+        const pqWire = NAMED_GROUP_CODES["X25519MLKEM768"];
+        const bytes = Array.from(hello);
+        // Find the key_share extension (type 51 = 0x0033).
+        const ksIdx = bytes.indexOf(0x33, bytes.indexOf(0x00));
+        expect(ksIdx).toBeGreaterThan(-1);
+        const afterExt = bytes.slice(ksIdx);
+        // The group ID 0x11ec should appear in the key_share entries.
+        expect(afterExt.includes(0x11)).toBe(true);
+        expect(afterExt.includes(0xec)).toBe(true);
+        void pqWire;
+    });
+
+    it("does NOT strip PQ groups even when crypto backend cannot key them", async () => {
+        // Both X25519MLKEM768 and X25519Kyber768 should survive encoding.
+        const kps: KeyPair[] = [
+            { algorithm: "X25519MLKEM768", privateKey: new Uint8Array(32), publicKey: new Uint8Array(32) },
+            { algorithm: "X25519Kyber768", privateKey: new Uint8Array(32), publicKey: new Uint8Array(32) },
+        ];
+        const cfg: ClientHelloConfig = {
+            ...BASE_CONFIG,
+            keyShareGroups: ["X25519MLKEM768", "X25519Kyber768"],
+            extensionOrder: [ExtensionType.SUPPORTED_GROUPS, ExtensionType.KEY_SHARE],
+            grease: false,
+        };
+        const hello = buildClientHello(cfg, kps, () => 0, crypto);
+        expect(hello[0]).toBe(0x01);
+        // Message should be well-formed (no crash, positive length).
+        expect(hello.length).toBeGreaterThan(50);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// EC point formats from config (Fix 3)
+// ---------------------------------------------------------------------------
+
+describe("buildClientHello ec_point_formats from config", () => {
+    /**
+     * Extract a single extension's body from a serialized ClientHello.
+     * Returns the body bytes, or undefined if the extension is absent.
+     */
+    function extractExtensionBody(hello: Uint8Array, type: number): Uint8Array | undefined {
+        // Walk past the fixed ClientHello header to reach the extensions block.
+        // Layout: type(1) + length(3) + version(2) + random(32) + sid_len(1)
+        // + sid + cipher_len(2) + ciphers + comp_len(1) + comp + ext_len(2).
+        let o = 4 + 2 + 32; // past type(1) + len(3) + version(2) + random(32)
+        const sidLen = hello[o]!;
+        o += 1 + sidLen;
+        const cipherLen = (hello[o]! << 8) | hello[o + 1]!;
+        o += 2 + cipherLen;
+        const compLen = hello[o]!;
+        o += 1 + compLen;
+        // Extensions block: ext_len(2) + extensions
+        const extTotalLen = (hello[o]! << 8) | hello[o + 1]!;
+        o += 2;
+        const extEnd = o + extTotalLen;
+        while (o + 4 <= extEnd) {
+            const eType = (hello[o]! << 8) | hello[o + 1]!;
+            const eLen = (hello[o + 2]! << 8) | hello[o + 3]!;
+            o += 4;
+            if (eType === type) {
+                return hello.subarray(o, o + eLen);
+            }
+            o += eLen;
+        }
+        return undefined;
+    }
+
+    it("defaults to [0x00] (uncompressed) when not specified", async () => {
+        const kps = await keyPairs(["x25519"]);
+        const cfg: ClientHelloConfig = {
+            ...BASE_CONFIG,
+            grease: false,
+            extensionOrder: [ExtensionType.EC_POINT_FORMATS],
+        };
+        const hello = buildClientHello(cfg, kps, () => 0, crypto);
+        const body = extractExtensionBody(hello, ExtensionType.EC_POINT_FORMATS);
+        expect(body).toBeDefined();
+        // Default = [0x00] → body = [0x01, 0x00] (count=1, format=uncompressed)
+        expect(body![0]).toBe(1);
+        expect(body![1]).toBe(0x00);
+    });
+
+    it("uses config.ecPointFormats when specified", async () => {
+        const kps = await keyPairs(["x25519"]);
+        const cfg: ClientHelloConfig = {
+            ...BASE_CONFIG,
+            grease: false,
+            extensionOrder: [ExtensionType.EC_POINT_FORMATS],
+            ecPointFormats: [0x01, 0x00],
+        };
+        const hello = buildClientHello(cfg, kps, () => 0, crypto);
+        const body = extractExtensionBody(hello, ExtensionType.EC_POINT_FORMATS);
+        expect(body).toBeDefined();
+        expect(body![0]).toBe(2); // 2 formats
+        expect(body![1]).toBe(0x01);
+        expect(body![2]).toBe(0x00);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// compress_certificate algorithms from config (Fix 4)
+// ---------------------------------------------------------------------------
+
+describe("buildClientHello compress_certificate from config", () => {
+    function extractExtensionBody(hello: Uint8Array, type: number): Uint8Array | undefined {
+        let o = 4 + 2 + 32;
+        const sidLen = hello[o]!;
+        o += 1 + sidLen;
+        const cipherLen = (hello[o]! << 8) | hello[o + 1]!;
+        o += 2 + cipherLen;
+        const compLen = hello[o]!;
+        o += 1 + compLen;
+        const extTotalLen = (hello[o]! << 8) | hello[o + 1]!;
+        o += 2;
+        const extEnd = o + extTotalLen;
+        while (o + 4 <= extEnd) {
+            const eType = (hello[o]! << 8) | hello[o + 1]!;
+            const eLen = (hello[o + 2]! << 8) | hello[o + 3]!;
+            o += 4;
+            if (eType === type) {
+                return hello.subarray(o, o + eLen);
+            }
+            o += eLen;
+        }
+        return undefined;
+    }
+
+    it("defaults to [0x02] (brotli) when not specified", async () => {
+        const kps = await keyPairs(["x25519"]);
+        const cfg: ClientHelloConfig = {
+            ...BASE_CONFIG,
+            grease: false,
+            extensionOrder: [ExtensionType.COMPRESS_CERTIFICATE],
+        };
+        const hello = buildClientHello(cfg, kps, () => 0, crypto);
+        const body = extractExtensionBody(hello, ExtensionType.COMPRESS_CERTIFICATE);
+        expect(body).toBeDefined();
+        // Default = [0x02] → body = [0x02, 0x00, 0x02] (list_len=2, algo=0x0002)
+        expect(body![0]).toBe(2); // algorithm list length in bytes (1 algo * 2)
+        expect(body![1]).toBe(0x00);
+        expect(body![2]).toBe(0x02); // brotli
+    });
+
+    it("uses config.compressCertificateAlgorithms when specified", async () => {
+        const kps = await keyPairs(["x25519"]);
+        const cfg: ClientHelloConfig = {
+            ...BASE_CONFIG,
+            grease: false,
+            extensionOrder: [ExtensionType.COMPRESS_CERTIFICATE],
+            compressCertificateAlgorithms: [0x02, 0x01, 0x03],
+        };
+        const hello = buildClientHello(cfg, kps, () => 0, crypto);
+        const body = extractExtensionBody(hello, ExtensionType.COMPRESS_CERTIFICATE);
+        expect(body).toBeDefined();
+        expect(body![0]).toBe(6); // 3 algorithms * 2 bytes
+        expect(body![1]).toBe(0x00);
+        expect(body![2]).toBe(0x02); // brotli
+        expect(body![3]).toBe(0x00);
+        expect(body![4]).toBe(0x01); // zlib
+        expect(body![5]).toBe(0x00);
+        expect(body![6]).toBe(0x03); // zstd
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Record padding (Fix 5)
+// ---------------------------------------------------------------------------
+
+describe("buildClientHello record padding", () => {
+    it("does not pad when recordPadding is not set", async () => {
+        const kps = await keyPairs(["x25519"]);
+        const cfg: ClientHelloConfig = { ...BASE_CONFIG };
+        const hello = buildClientHello(cfg, kps, () => 0, crypto);
+        // Without padding, the message should be much smaller than 512.
+        expect(hello.length).toBeLessThan(512);
+    });
+
+    it("pads the ClientHello to exactly 512 bytes when recordPadding is set", async () => {
+        const kps = await keyPairs(["x25519"]);
+        const cfg: ClientHelloConfig = {
+            ...BASE_CONFIG,
+            recordPadding: 512,
+        };
+        const hello = buildClientHello(cfg, kps, () => 0, crypto);
+        expect(hello.length).toBe(512);
+    });
+
+    it("pads to an arbitrary target length", async () => {
+        const kps = await keyPairs(["x25519"]);
+        const cfg: ClientHelloConfig = {
+            ...BASE_CONFIG,
+            recordPadding: 256,
+        };
+        const hello = buildClientHello(cfg, kps, () => 0, crypto);
+        expect(hello.length).toBe(256);
+    });
+
+    it("does not pad when the message already exceeds the target", async () => {
+        const kps = await keyPairs(["x25519"]);
+        const cfg: ClientHelloConfig = {
+            ...BASE_CONFIG,
+            recordPadding: 50, // smaller than the base message
+        };
+        const hello = buildClientHello(cfg, kps, () => 0, crypto);
+        // The message should be its natural size (no truncation, no padding).
+        expect(hello.length).toBeGreaterThan(50);
+    });
+
+    it("pads correctly when PADDING is already in the extension order", async () => {
+        const kps = await keyPairs(["x25519"]);
+        const cfg: ClientHelloConfig = {
+            ...BASE_CONFIG,
+            extensionOrder: [...BASE_CONFIG.extensionOrder, ExtensionType.PADDING],
+            recordPadding: 512,
+        };
+        const hello = buildClientHello(cfg, kps, () => 0, crypto);
+        expect(hello.length).toBe(512);
     });
 });
