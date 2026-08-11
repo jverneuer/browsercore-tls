@@ -148,7 +148,10 @@ describe("connectTls full handshake (runHandshake)", () => {
         expect(transport.written.length).toBe(0);
     });
 
-    it("rejects a profile whose key-share groups are all unsupported", async () => {
+    it("rejects a profile whose key-share groups are all unsupported by the crypto backend", async () => {
+        // The driver now offers ALL groups in keyShareGroups (no x25519-only
+        // filter). Groups the crypto backend cannot generate (x448, secp521r1,
+        // ffdhe*) fail fast in generateKeyShares with a typed handshake error.
         const sim = new TlsServerSim();
         const transport = new HandshakeTransport(sim);
         await expect(
@@ -156,7 +159,7 @@ describe("connectTls full handshake (runHandshake)", () => {
                 transport,
                 crypto,
                 serverName: "example.com",
-                profile: { ...PROFILE, keyShareGroups: ["secp256r1"] },
+                profile: { ...PROFILE, keyShareGroups: ["x448"] },
                 events: createMockEventProvider(),
             }),
         ).rejects.toThrow(TlsHandshakeError);
@@ -164,11 +167,11 @@ describe("connectTls full handshake (runHandshake)", () => {
             await connectTls({
                 transport: new HandshakeTransport(new TlsServerSim()),
                 serverName: "example.com",
-                profile: { ...PROFILE, keyShareGroups: ["secp256r1"] },
+                profile: { ...PROFILE, keyShareGroups: ["x448"] },
                 events: createMockEventProvider(),
             });
         } catch (e) {
-            expect((e as TlsHandshakeError).cause?.message).toMatch(/no supported key share groups/);
+            expect((e as TlsHandshakeError).cause?.message).toMatch(/not supported by the crypto backend/);
         }
     });
 

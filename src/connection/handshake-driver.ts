@@ -126,9 +126,6 @@ export interface HandshakeContext {
     sendAlert(level: AlertLevel, description: number): Promise<void>;
 }
 
-/** Constant: the only key-share group the crypto backend can generate. */
-const SUPPORTED_GROUP = "x25519";
-
 /** Apply the result of {@link parseServerHello} to the context's fields. */
 function applyNegotiation(ctx: HandshakeContext): void {
     ctx.aead = cipherSuiteToAead(ctx.cipherSuite);
@@ -159,16 +156,20 @@ export async function runHandshake(
         });
     }
 
-    // 1. Generate key shares for the groups the crypto backend supports.
+    // 1. Generate key shares for ALL groups the profile offers — including
+    // post-quantum hybrids (X25519MLKEM768). The crypto backend generates an
+    // X25519 key tagged with the hybrid name so the key_share extension emits
+    // the correct group ID. Multiple key shares are mandatory for matching real
+    // browser fingerprints (Chrome offers x25519, secp256r1, secp384r1, and
+    // X25519MLKEM768 simultaneously).
     ctx.currentPhase = "client_hello";
     ctx.onDebug?.("phase: client_hello — generating key shares");
-    const desired = profile.keyShareGroups.filter((g) => g === SUPPORTED_GROUP);
-    if (desired.length === 0) {
+    const keyPairs = await generateKeyShares(profile.keyShareGroups);
+    if (keyPairs.length === 0) {
         throw new TlsHandshakeError("client_hello", {
             cause: new Error("no supported key share groups in the selected profile"),
         });
     }
-    const keyPairs = await generateKeyShares(desired);
 
     // 2. Build and send the ClientHello as a plaintext handshake record.
     ctx.onDebug?.("phase: client_hello — building and sending ClientHello");
@@ -312,6 +313,11 @@ export async function runHandshake(
         ctx.onDebug,
     );
     ctx.clientHsSeq++;
+    // Record the client Finished in the transcript. The resumption_master_secret
+    // (RFC 8446 §7.5) is Derive-Secret(master_secret, "res master",
+    // Transcript-Hash(ClientHello..client Finished)) — so the transcript MUST
+    // include it for post-handshake NewSessionTicket processing.
+    ctx.transcript.push(finishedMessage);
     ctx.onDebug?.("phase: client_finished — client Finished sent");
 
     ctx.currentPhase = "application";

@@ -166,6 +166,26 @@ export interface ClientHelloConfig {
      * group. Real Chrome sets this; real Firefox does not.
      */
     readonly grease: boolean;
+    /**
+     * EC point formats offered in the `ec_point_formats` extension (wire byte
+     * values). Defaults to `[0x00]` (uncompressed) when omitted. Real browsers
+     * list `[0x01, 0x00]` (ansiX962_compressed_prime + uncompressed) for
+     * fingerprint compatibility.
+     */
+    readonly ecPointFormats?: readonly number[];
+    /**
+     * Algorithm IDs offered in the `compress_certificate` extension (RFC 8879),
+     * as 16-bit IANA wire values. Defaults to `[0x02]` (brotli) when omitted.
+     * Real Chrome lists `[0x02, 0x01, 0x03]` (brotli, zlib, zstd).
+     */
+    readonly compressCertificateAlgorithms?: readonly number[];
+    /**
+     * Target ClientHello message length in bytes for the PADDING extension
+     * (RFC 7685 / RFC 8446 §4.1.2). When set, the ClientHello is padded with
+     * zero bytes in the PADDING extension (type 21) to reach exactly this
+     * length. Chrome defaults to 512. Omit to disable padding.
+     */
+    readonly recordPadding?: number;
 }
 
 /**
@@ -237,9 +257,14 @@ export interface TlsOptions {
 /**
  * An asymmetric key pair. Bytes are algorithm-specific; this package never
  * generates them — it asks @browsercore/crypto.
+ *
+ * Post-quantum hybrid groups (`X25519MLKEM768`, `X25519Kyber768`) carry an
+ * X25519 key under the hood (the crypto backend has no PQ support), tagged with
+ * the hybrid name so the key_share extension emits the correct group ID for
+ * fingerprint compatibility.
  */
 export interface KeyPair {
-    readonly algorithm: "x25519" | "secp256r1" | "secp384r1";
+    readonly algorithm: "x25519" | "secp256r1" | "secp384r1" | "X25519MLKEM768" | "X25519Kyber768";
     /** Private key bytes (opaque to this package). */
     readonly privateKey: Uint8Array;
     /** Public key bytes, as would appear in a KeyShareEntry. */

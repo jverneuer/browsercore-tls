@@ -52,13 +52,18 @@ export function computeSharedSecret(serverHello: ServerHello, keyPairs: readonly
     }
     const serverPublicKey = keyShare.data.subarray(4, 4 + keyLen);
     // Post-quantum hybrid groups (X25519MLKEM768, X25519Kyber768) are advertised
-    // in supported_groups for fingerprint compatibility, but the crypto backend
-    // has no post-quantum support. If a server selects one, fall back to the
-    // classical x25519 half of the hybrid: use the x25519 key pair against the
-    // server's x25519 key share (the server sends only its classical share when
-    // the client never offered a post-quantum key).
-    const exchangeGroup = (group === "X25519MLKEM768" || group === "X25519Kyber768") ? "x25519" : group;
-    const myPair = keyPairs.find((kp) => kp.algorithm === exchangeGroup);
+    // in supported_groups and key_share for fingerprint compatibility, but the
+    // crypto backend has no post-quantum support. When a server selects one, we
+    // look up the hybrid-tagged key pair (which holds an X25519 key) and perform
+    // the classical X25519 exchange against the server's classical key share.
+    const isHybrid = group === "X25519MLKEM768" || group === "X25519Kyber768";
+    const exchangeGroup = isHybrid ? "x25519" : group;
+    // Prefer a key pair tagged with the actual negotiated group (handles both
+    // the hybrid case, where we tag as the hybrid name, and the direct case).
+    // Fall back to x25519 for hybrid groups if no hybrid-tagged pair exists
+    // (backward compat with profiles that only offer x25519).
+    const myPair = keyPairs.find((kp) => kp.algorithm === group)
+        ?? (isHybrid ? keyPairs.find((kp) => kp.algorithm === "x25519") : undefined);
     if (myPair === undefined) {
         throw new TlsHandshakeError("server_hello", {
             cause: new Error(`server selected key share group ${group} we did not offer`),

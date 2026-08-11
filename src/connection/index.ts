@@ -30,3 +30,7 @@ export {
 } from "./record-layer.js";
 export { runHandshake, type HandshakeContext } from "./handshake-driver.js";
 export { updateTrafficSecrets } from "../crypto/keySchedule.js";
+// Re-export the Certificate type so tls.ts (which imports only through this
+// barrel) does not need a direct dependency on certificates.js — the connection
+// module already depends on it transitively via handshake-messages.ts.
+export type { Certificate } from "../certificates/certificates.js";

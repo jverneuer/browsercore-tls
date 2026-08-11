@@ -22,6 +22,7 @@ import { ExtensionType, isGreaseValue, namedGroupToWire, signatureSchemeToWire }
 export { isGreaseValue } from "../extensions/extensions.js";
 import { HandshakeType } from "./handshake-types.js";
 import { CIPHER_SUITE_CODES } from "../iana/index.js";
+import { computePaddingExtensionBody } from "../record/record-padding.js";
 
 /** TLS 1.2 wire version used as legacy_version in TLS 1.3 records/handshakes. */
 const TLS_1_2_WIRE_VERSION = 0x0303;
@@ -115,8 +116,6 @@ export function buildClientHello(
     const sessionId = new Uint8Array(0);
     const compressionMethods = new Uint8Array([0x00]);
 
-    const extensions = buildClientHelloExtensions(config, keyPairs, greaseValue, provider, cookie);
-
     const cipherWires: number[] = config.cipherSuites.map((suite, i) => {
         if (suite === undefined) {
             throw new TlsHandshakeError("client_hello", {
@@ -148,11 +147,31 @@ export function buildClientHello(
         cipherSuitesBytes[i * 2 + 1] = wire & 0xff;
     }
 
+    // Build base extensions (with zero padding) to measure the ClientHello size.
+    const baseExtensions = buildClientHelloExtensions(config, keyPairs, greaseValue, provider, cookie);
+
+    // Record padding (RFC 7685 / RFC 8446 §4.1.2): measure the base ClientHello
+    // (extensions built with zero padding), then rebuild with the computed
+    // padding body so the total message hits `config.recordPadding` bytes.
+    let finalExtensions = baseExtensions;
+    if (config.recordPadding !== undefined) {
+        const bodyLenProbe =
+            2 + randomBytes.length + 1 + sessionId.length +
+            2 + cipherSuitesBytes.length +
+            1 + compressionMethods.length +
+            2 + baseExtensions.length;
+        const probeMessageSize = 4 + bodyLenProbe;
+        const paddingAmount = computePaddingExtensionBody(probeMessageSize, config);
+        if (paddingAmount > 0) {
+            finalExtensions = buildClientHelloExtensions(config, keyPairs, greaseValue, provider, cookie, paddingAmount);
+        }
+    }
+
     const bodyLen =
         2 + randomBytes.length + 1 + sessionId.length +
         2 + cipherSuitesBytes.length +
         1 + compressionMethods.length +
-        2 + extensions.length;
+        2 + finalExtensions.length;
 
     const message = new Uint8Array(1 + 3 + bodyLen);
     let o = 0;
@@ -174,9 +193,9 @@ export function buildClientHello(
     message[o++] = compressionMethods.length & 0xff;
     message.set(compressionMethods, o);
     o += compressionMethods.length;
-    message[o++] = (extensions.length >> 8) & 0xff;
-    message[o++] = extensions.length & 0xff;
-    message.set(extensions, o);
+    message[o++] = (finalExtensions.length >> 8) & 0xff;
+    message[o++] = finalExtensions.length & 0xff;
+    message.set(finalExtensions, o);
 
     return message;
 }
@@ -187,14 +206,19 @@ function buildClientHelloExtensions(
     greaseValue: number,
     provider: CryptoProvider,
     cookie?: Uint8Array,
+    paddingAmount = 0,
 ): Uint8Array {
     const order = config.grease
         ? [greaseValue, ...config.extensionOrder]
         : [...config.extensionOrder];
 
     const parts: Uint8Array[] = [];
+    let paddingInOrder = false;
     for (const type of order) {
-        const body = encodeExtensionBody(type, config, keyPairs, greaseValue, provider);
+        if (type === ExtensionType.PADDING) {
+            paddingInOrder = true;
+        }
+        const body = encodeExtensionBody(type, config, keyPairs, greaseValue, provider, paddingAmount);
         // Unknown extension types return undefined (no encoder). Skip them so
         // they don't bloat the ClientHello. GREASE, padding, SCT, EMS, etc. all
         // legitimately produce zero-length bodies — they must still be emitted.
@@ -208,6 +232,12 @@ function buildClientHelloExtensions(
     // is preserved.
     if (cookie !== undefined && cookie.length > 0) {
         parts.push(wrapExtension(ExtensionType.COOKIE, encodeCookie(cookie)));
+    }
+
+    // When padding is needed and the PADDING extension was not in the profile's
+    // extension order, append it at the very end (real browsers place it last).
+    if (!paddingInOrder && paddingAmount > 0) {
+        parts.push(wrapExtension(ExtensionType.PADDING, new Uint8Array(paddingAmount)));
     }
 
     let total = 0;
@@ -229,6 +259,7 @@ function encodeExtensionBody(
     keyPairs: readonly KeyPair[],
     greaseValue: number,
     provider: CryptoProvider,
+    paddingAmount = 0,
 ): Uint8Array | undefined {
     switch (type) {
         case ExtensionType.SERVER_NAME:
@@ -238,7 +269,7 @@ function encodeExtensionBody(
         case ExtensionType.SUPPORTED_GROUPS:
             return encodeSupportedGroups(config.keyShareGroups);
         case ExtensionType.EC_POINT_FORMATS:
-            return encodeEcPointFormats();
+            return encodeEcPointFormats(config.ecPointFormats);
         case ExtensionType.SIGNATURE_ALGORITHMS:
             return encodeSignatureAlgorithms(config.signatureAlgorithms);
         case ExtensionType.APPLICATION_LAYER_PROTOCOL_NEGOTIATION:
@@ -258,7 +289,7 @@ function encodeExtensionBody(
         case ExtensionType.EXTENDED_MASTER_SECRET:
             return new Uint8Array(0);
         case ExtensionType.COMPRESS_CERTIFICATE:
-            return encodeCompressCertificate();
+            return encodeCompressCertificate(config.compressCertificateAlgorithms);
         case ExtensionType.SESSION_TICKET:
             return new Uint8Array(0);
         case ExtensionType.PRE_SHARED_KEY:
@@ -270,8 +301,9 @@ function encodeExtensionBody(
         case ExtensionType.KEY_SHARE:
             return encodeKeyShareClient(config, keyPairs, greaseValue, provider);
         case ExtensionType.PADDING:
-            // RFC 7685: the extension's presence is the fingerprint signal; body is empty.
-            return new Uint8Array(0);
+            // RFC 7685: the body is a run of zero bytes. The length is computed
+            // by the caller via computePaddingExtensionBody and threaded through.
+            return new Uint8Array(paddingAmount);
         case ExtensionType.RENEGOTIATION_INFO:
             return encodeRenegotiationInfo();
         default:
@@ -285,18 +317,15 @@ function encodeExtensionBody(
 }
 
 function encodeSupportedGroups(groups: readonly NamedGroup[]): Uint8Array {
-    // The crypto backend has no post-quantum support, so strip hybrid
-    // post-quantum groups from supported_groups. They are only useful as a
-    // fingerprint signal when the server cannot actually select them — and a
-    // server that does select one would produce a key_share we can't answer.
-    const encodable = groups.filter(
-        (g) => g !== "X25519MLKEM768" && g !== "X25519Kyber768",
-    );
-    const out = new Uint8Array(2 + encodable.length * 2);
-    out[0] = ((encodable.length * 2) >> 8) & 0xff;
-    out[1] = (encodable.length * 2) & 0xff;
-    for (let i = 0; i < encodable.length; i++) {
-        const group = encodable[i];
+    // Emit ALL offered groups verbatim — including post-quantum hybrids like
+    // X25519MLKEM768 (0x11ec). They must appear in supported_groups for the
+    // JA3/JA4 fingerprint to match real browsers. The crypto backend falls back
+    // to the classical X25519 half if a server actually selects a hybrid.
+    const out = new Uint8Array(2 + groups.length * 2);
+    out[0] = ((groups.length * 2) >> 8) & 0xff;
+    out[1] = (groups.length * 2) & 0xff;
+    for (let i = 0; i < groups.length; i++) {
+        const group = groups[i];
         if (group === undefined) {
             throw new TlsHandshakeError("client_hello", {
                 cause: new Error(`supported group at index ${i} is missing`),
@@ -309,8 +338,31 @@ function encodeSupportedGroups(groups: readonly NamedGroup[]): Uint8Array {
     return out;
 }
 
-function encodeEcPointFormats(): Uint8Array {
-    return new Uint8Array([0x01, 0x00]);
+/** Default EC point formats: uncompressed (0x00) only. */
+const DEFAULT_EC_POINT_FORMATS: readonly number[] = [0x00];
+
+/**
+ * Encode the `ec_point_formats` extension body from config.
+ *
+ * Defaults to `[0x00]` (uncompressed) when the profile omits the field. Real
+ * browsers list `[0x01, 0x00]` (ansiX962_compressed_prime + uncompressed) — the
+ * exact ordering is a fingerprint signal, so it flows from the profile.
+ */
+function encodeEcPointFormats(formats: readonly number[] | undefined): Uint8Array {
+    const list = formats ?? DEFAULT_EC_POINT_FORMATS;
+    const out = new Uint8Array(1 + list.length);
+    out[0] = list.length & 0xff;
+    for (let i = 0; i < list.length; i++) {
+        const fmt = list[i];
+        /* v8 ignore next 3 */
+        if (fmt === undefined) {
+            throw new TlsHandshakeError("client_hello", {
+                cause: new Error(`EC point format at index ${i} is missing`),
+            });
+        }
+        out[1 + i] = fmt & 0xff;
+    }
+    return out;
 }
 
 function encodeApplicationSettings(alpnProtocols: readonly string[] | undefined): Uint8Array {
@@ -318,12 +370,22 @@ function encodeApplicationSettings(alpnProtocols: readonly string[] | undefined)
     return encodeAlpn(protocols);
 }
 
-function encodeCompressCertificate(): Uint8Array {
-    const algorithms = [0x0001, 0x0002, 0x0003];
-    const out = new Uint8Array(1 + algorithms.length * 2);
-    out[0] = (algorithms.length * 2) & 0xff;
-    for (let i = 0; i < algorithms.length; i++) {
-        const algo = algorithms[i];
+/** Default compress_certificate algorithms: brotli (0x02) only. */
+const DEFAULT_COMPRESS_ALGORITHMS: readonly number[] = [0x02];
+
+/**
+ * Encode the `compress_certificate` extension body (RFC 8879) from config.
+ *
+ * Defaults to `[0x02]` (brotli) when the profile omits the field. Real Chrome
+ * lists `[0x02, 0x01, 0x03]` (brotli, zlib, zstd) — the exact ordering and set
+ * are fingerprint signals, so they flow from the profile.
+ */
+function encodeCompressCertificate(algorithms: readonly number[] | undefined): Uint8Array {
+    const list = algorithms ?? DEFAULT_COMPRESS_ALGORITHMS;
+    const out = new Uint8Array(1 + list.length * 2);
+    out[0] = (list.length * 2) & 0xff;
+    for (let i = 0; i < list.length; i++) {
+        const algo = list[i];
         /* v8 ignore next 3 */
         if (algo === undefined) {
             throw new TlsHandshakeError("client_hello", {
@@ -414,19 +476,14 @@ function encodeKeyShareClient(
     greaseValue: number,
     provider: CryptoProvider,
 ): Uint8Array {
-    // The crypto backend has no post-quantum support, so the key_share entry
-    // must only carry x25519 (and the NIST curves). Skip hybrid groups like
-    // X25519MLKEM768 / X25519Kyber768 — they are advertised in supported_groups
-    // for fingerprint compatibility but cannot be keyed here.
-    const nonHybridKeyPairs = keyPairs.filter(
-        (kp) => {
-            const algorithm = kp.algorithm as NamedGroup;
-            return algorithm !== "X25519MLKEM768" && algorithm !== "X25519Kyber768";
-        },
-    );
+    // Emit ALL offered key pairs — including post-quantum hybrid groups like
+    // X25519MLKEM768 (0x11ec). They must appear in the key_share extension for
+    // the JA3/JA4 fingerprint to match real browsers. The crypto backend
+    // generates an X25519 key tagged with the hybrid name; the server will
+    // typically select the classical X25519 group for the actual exchange.
     const greaseEntry = config.grease ? 2 + 2 + GREASE_KEY_LENGTH : 0;
     let entriesLen = greaseEntry;
-    for (const kp of nonHybridKeyPairs) {
+    for (const kp of keyPairs) {
         entriesLen += 2 + 2 + kp.publicKey.length;
     }
     const out = new Uint8Array(2 + entriesLen);
@@ -441,7 +498,7 @@ function encodeKeyShareClient(
         out.set(provider.randomBytes(GREASE_KEY_LENGTH), o);
         o += GREASE_KEY_LENGTH;
     }
-    for (const kp of nonHybridKeyPairs) {
+    for (const kp of keyPairs) {
         const groupWire = namedGroupToWire(kp.algorithm);
         out[o++] = (groupWire >> 8) & 0xff;
         out[o++] = groupWire & 0xff;
