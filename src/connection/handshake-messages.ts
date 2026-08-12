@@ -42,6 +42,9 @@ export function parseAlpnFromEncryptedExtensions(body: Uint8Array): string | und
  * Parse a Certificate handshake message (RFC 8446 §4.4.2) into a chain. The body
  * is: certificate_request_context (length-prefixed, len 1) then a length-prefixed
  * list of CertificateEntry { cert_data, extensions }.
+ *
+ * If a certificate entry's bytes cannot be parsed as DER, the error is wrapped
+ * with a clear diagnostic suggesting the data may be compressed (RFC 8879).
  */
 export function parseCertificateMessage(body: Uint8Array): CertificateChain {
     let o = 0;
@@ -65,13 +68,33 @@ export function parseCertificateMessage(body: Uint8Array): CertificateChain {
         });
     }
     const certs: Certificate[] = [];
+    let entryIndex = 0;
     while (o < listEnd) {
         const certLen = (readByte() << 16) | (readByte() << 8) | readByte();
         const certDer = body.subarray(o, o + certLen);
         o += certLen;
         const extLen = (readByte() << 8) | readByte();
         o += extLen;
-        certs.push(parseCertificate(certDer));
+        try {
+            certs.push(parseCertificate(certDer));
+        } catch (cause) {
+            // If parseCertificate fails, the cert_data may be compressed (RFC 8879)
+            // rather than raw DER. A DER Certificate always starts with a SEQUENCE
+            // (0x30); a compressed blob (brotli/zlib/zstd) almost certainly won't.
+            // Provide a clear diagnostic so the operator can tell compression from a
+            // genuine parser bug.
+            throw new TlsHandshakeError("certificate", {
+                cause: new Error(
+                    `failed to parse CertificateEntry ${entryIndex} as DER ` +
+                        `(first byte: 0x${(certDer[0] ?? 0).toString(16).padStart(2, "0")}, ` +
+                        `len: ${certDer.length}). The certificate data may be compressed ` +
+                        `(RFC 8879). If the client advertised compress_certificate (ext 27), ` +
+                        `remove it from the profile extensionOrder.`,
+                    cause instanceof Error ? { cause } : undefined,
+                ),
+            });
+        }
+        entryIndex++;
     }
     if (certs.length === 0) {
         throw new TlsHandshakeError("certificate", {
