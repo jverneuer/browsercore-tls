@@ -11,6 +11,8 @@
  * - handshake-driver.ts:377 — decrypted record contained no handshake messages
  * - handshake-driver.ts:420 — CertificateVerify received before Certificate consumed
  * - handshake-driver.ts:433 — server sends CompressedCertificate (type 25) instead of Certificate
+ * - handshake-driver.ts:168 — profile keyShareGroups yields no supported key shares
+ * - handshake-driver.ts:445 — unexpected handshake type in the Certificate phase
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -267,5 +269,53 @@ describe("runHandshake — server sends CompressedCertificate (RFC 8879, type 25
                 events: createMockEventProvider(),
             }),
         ).rejects.toThrow(/CompressedCertificate.*RFC 8879/);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// handshake-driver.ts:168 — profile with no supported key share groups
+// ---------------------------------------------------------------------------
+
+describe("runHandshake — profile keyShareGroups yields no supported key shares", () => {
+    it("throws when generateKeyShares returns an empty list", async () => {
+        // A profile whose keyShareGroups contains no recognized group causes
+        // generateKeyShares to return [] — the driver must reject before building
+        // the ClientHello with an actionable error.
+        const sim = new TlsServerSim();
+        const transport = new SimTransport(sim);
+
+        await expect(
+            connectTls({
+                transport,
+                crypto,
+                serverName: "example.com",
+                profile: { ...PROFILE, keyShareGroups: [] },
+                events: createMockEventProvider(),
+            }),
+        ).rejects.toThrow(/no supported key share groups/);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// handshake-driver.ts:445 — unexpected handshake type in Certificate phase
+// ---------------------------------------------------------------------------
+
+describe("runHandshake — unexpected handshake type in Certificate phase", () => {
+    it("throws 'expected Certificate' for a type that is neither 11 nor 25", async () => {
+        // The server sends a handshake type (99) that is neither Certificate
+        // (11) nor CompressedCertificate (25) in the Certificate slot. The
+        // driver must reject it with a clear "expected Certificate" error.
+        const sim = new TlsServerSim({ certHandshakeType: 99 });
+        const transport = new SimTransport(sim);
+
+        await expect(
+            connectTls({
+                transport,
+                crypto,
+                serverName: "example.com",
+                profile: PROFILE,
+                events: createMockEventProvider(),
+            }),
+        ).rejects.toThrow(/expected Certificate/);
     });
 });

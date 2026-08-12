@@ -114,6 +114,13 @@ export interface ServerOptions {
      */
     sendCompressedCertificate?: boolean;
     /**
+     * When set, overrides the Certificate message's handshake type byte with an
+     * arbitrary value. Used to exercise the driver's "expected Certificate" guard
+     * for any type that is neither Certificate (11) nor CompressedCertificate
+     * (25) — e.g. a malformed flight from a buggy server.
+     */
+    certHandshakeType?: number;
+    /**
      * When set, the server sends a HelloRetryRequest (RFC 8446 §4.1.3) instead
      * of a ServerHello in response to the first ClientHello. The client must
      * rewrite the transcript with a synthetic message_hash, generate a fresh key
@@ -498,6 +505,12 @@ export class TlsServerSim {
         // error since it never advertised compress_certificate (ext 27).
         if (this.opts.sendCompressedCertificate) {
             cert[0] = 25;
+        }
+        // Override the Certificate handshake type with an arbitrary value so the
+        // driver's generic "expected Certificate" guard fires for any type that
+        // is neither Certificate (11) nor CompressedCertificate (25).
+        if (this.opts.certHandshakeType !== undefined) {
+            cert[0] = this.opts.certHandshakeType;
         }
         // The transcript for CertificateVerify covers ClientHello..Certificate.
         // After HRR, it includes the message_hash prefix + HRR + ClientHello_2.
