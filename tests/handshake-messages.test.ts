@@ -210,6 +210,55 @@ describe("parseCertificateMessage", () => {
         const body = new Uint8Array([0x00]);
         expect(() => parseCertificateMessage(body)).toThrow(TlsHandshakeError);
     });
+
+    it("throws a clear compression diagnostic when cert_data is not valid DER (brotli-like)", () => {
+        // Simulate a compressed certificate: brotli streams start with 0x21 or
+        // similar non-DER bytes. A DER Certificate always starts with 0x30.
+        const compressedBytes = new Uint8Array([0x21, 0x8b, 0x80, 0x00, 0x00, 0x00, 0xff]);
+        const body = buildCertMessageBody([compressedBytes]);
+        expect(() => parseCertificateMessage(body)).toThrow(TlsHandshakeError);
+        try {
+            parseCertificateMessage(body);
+        } catch (e) {
+            const msg = (e as TlsHandshakeError).cause?.message ?? "";
+            expect(msg).toMatch(/may be compressed/);
+            expect(msg).toMatch(/CertificateEntry 0/);
+            expect(msg).toMatch(/0x21/);
+            expect(msg).toMatch(/ext 27/);
+        }
+    });
+
+    it("includes the correct entry index for a compressed second certificate", () => {
+        const validCert = makeSelfSignedCert("valid.example.com");
+        const compressedBytes = new Uint8Array([0xce, 0xba, 0xfe, 0x00]);
+        const body = buildCertMessageBody([validCert, compressedBytes]);
+        try {
+            parseCertificateMessage(body);
+            expect.fail("should have thrown");
+        } catch (e) {
+            const msg = (e as TlsHandshakeError).cause?.message ?? "";
+            expect(msg).toMatch(/CertificateEntry 1/);
+        }
+    });
+
+    it("wraps the original DER parse error as the inner cause", () => {
+        // Use bytes that parseTlv can decode but whose tag isn't a SEQUENCE:
+        // 0x04 (OCTET STRING) with length 1, value 0x00 — a valid TLV but not
+        // a DER Certificate. parseCertificate's tag check will throw.
+        const nonDerBytes = new Uint8Array([0x04, 0x01, 0x00]);
+        const body = buildCertMessageBody([nonDerBytes]);
+        try {
+            parseCertificateMessage(body);
+            expect.fail("should have thrown");
+        } catch (e) {
+            const cause = (e as TlsHandshakeError).cause;
+            expect(cause).toBeDefined();
+            expect(cause?.cause).toBeDefined();
+            // The inner cause should be the original parseCertificate error
+            // (a TlsHandshakeError about the tag mismatch).
+            expect(cause?.cause?.message).toMatch(/tag/);
+        }
+    });
 });
 
 describe("validateCertificateChain", () => {

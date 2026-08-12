@@ -10,6 +10,7 @@
  * - handshake-driver.ts:248 — second ServerHello after HRR is not HANDSHAKE type
  * - handshake-driver.ts:377 — decrypted record contained no handshake messages
  * - handshake-driver.ts:420 — CertificateVerify received before Certificate consumed
+ * - handshake-driver.ts:433 — server sends CompressedCertificate (type 25) instead of Certificate
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -245,5 +246,26 @@ describe("runHandshake — CertificateVerify before Certificate consumed", () =>
         ).rejects.toThrow(/CertificateVerify received before a Certificate/);
 
         spy.mockRestore();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// handshake-driver.ts:433 — server sends CompressedCertificate (type 25)
+// ---------------------------------------------------------------------------
+
+describe("runHandshake — server sends CompressedCertificate (RFC 8879, type 25)", () => {
+    it("throws an actionable error mentioning compress_certificate (ext 27)", async () => {
+        const sim = new TlsServerSim({ sendCompressedCertificate: true });
+        const transport = new SimTransport(sim);
+
+        await expect(
+            connectTls({
+                transport,
+                crypto,
+                serverName: "example.com",
+                profile: PROFILE,
+                events: createMockEventProvider(),
+            }),
+        ).rejects.toThrow(/CompressedCertificate.*RFC 8879/);
     });
 });

@@ -107,6 +107,13 @@ export interface ServerOptions {
      */
     tamperCertificateVerify?: boolean;
     /**
+     * When true, the server sends a CompressedCertificate (RFC 8879 type 25)
+     * instead of a Certificate (type 11). This simulates a non-conformant server
+     * or a middlebox that injected compress_certificate into the ClientHello —
+     * the client must detect the unexpected type and produce an actionable error.
+     */
+    sendCompressedCertificate?: boolean;
+    /**
      * When set, the server sends a HelloRetryRequest (RFC 8446 §4.1.3) instead
      * of a ServerHello in response to the first ClientHello. The client must
      * rewrite the transcript with a synthetic message_hash, generate a fresh key
@@ -486,6 +493,12 @@ export class TlsServerSim {
         // client will see them post-decryption).
         const ee = this.buildEncryptedExtensionsMessage();
         const cert = this.buildCertificateMessage();
+        // Simulate RFC 8879 CompressedCertificate (type 25) by flipping the
+        // handshake type byte. The client must reject this with an actionable
+        // error since it never advertised compress_certificate (ext 27).
+        if (this.opts.sendCompressedCertificate) {
+            cert[0] = 25;
+        }
         // The transcript for CertificateVerify covers ClientHello..Certificate.
         // After HRR, it includes the message_hash prefix + HRR + ClientHello_2.
         const transcriptBeforeCertVerify = [...helloTranscript, ee, cert];

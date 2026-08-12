@@ -428,6 +428,20 @@ async function consumeServerFlight(
     ctx.currentPhase = "certificate";
     ctx.onDebug?.("consumeServerFlight: expecting Certificate");
     message = await nextHandshakeMessage();
+    if (message.whole[0] === HandshakeType.COMPRESSED_CERTIFICATE) {
+        // RFC 8879: a server sends CompressedCertificate (type 25) only when the
+        // client advertised compress_certificate (ext 27). We never advertise it,
+        // so this means a non-conformant server or a ClientHello that was modified
+        // in transit (e.g. a CDN injecting the extension). Provide an actionable
+        // error so the operator can diagnose the root cause.
+        throw new TlsHandshakeError("certificate", {
+            cause: new Error(
+                "server sent a CompressedCertificate (RFC 8879, type 25) but this client did not advertise " +
+                    "compress_certificate (ext 27). The server is non-conformant or a middlebox injected the " +
+                    "extension. If ext 27 is in the profile extensionOrder, remove it.",
+            ),
+        });
+    }
     if (message.whole[0] !== HandshakeType.CERTIFICATE) {
         throw new TlsHandshakeError("certificate", {
             cause: new Error(

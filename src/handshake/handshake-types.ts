@@ -29,6 +29,13 @@ export const HandshakeType = {
     CLIENT_KEY_EXCHANGE: 16,
     FINISHED: 20,
     KEY_UPDATE: 24,
+    /**
+     * RFC 8879 §3 — CompressedCertificate. Sent by a server only when the
+     * client advertised the `compress_certificate` extension (ext 27). We never
+     * advertise it, so receiving this type signals a non-conformant server or a
+     * ClientHello that was modified in transit (e.g. by a CDN).
+     */
+    COMPRESSED_CERTIFICATE: 25,
     MESSAGE_HASH: 254,
 } as const;
 
