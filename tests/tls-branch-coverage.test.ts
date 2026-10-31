@@ -114,11 +114,15 @@ describe("generateKeyShares — PQ hybrid groups", () => {
         expect(shares[0]!.privateKey.length).toBe(32);
     });
 
-    it("generates an X25519 key tagged as X25519MLKEM768", async () => {
+    it("generates a real 1216-byte hybrid share for X25519MLKEM768", async () => {
         const shares = await generateKeyShares(["X25519MLKEM768"], crypto);
         expect(shares).toHaveLength(1);
         expect(shares[0]!.algorithm).toBe("X25519MLKEM768");
-        expect(shares[0]!.publicKey.length).toBe(32);
+        // Wire shape real Chrome sends: 32-byte X25519 public || 1184-byte
+        // ML-KEM-768 encapsulation key. A 32-byte share here produced
+        // decode_error rejections on strict peers (Cloudflare/BoringSSL).
+        expect(shares[0]!.publicKey.length).toBe(32 + 1184);
+        expect(shares[0]!.privateKey.length).toBe(32 + 2400);
     });
 
     it("generates an X25519 key for Secp256r1MLKEM768", async () => {

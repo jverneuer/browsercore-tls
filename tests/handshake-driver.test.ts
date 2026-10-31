@@ -182,7 +182,7 @@ describe("connectTls full handshake (runHandshake)", () => {
                 events: createMockEventProvider(),
             });
         } catch (e) {
-            expect((e as TlsHandshakeError).cause?.message).toMatch(/not supported by the crypto backend/);
+            expect((e as TlsHandshakeError).cause?.message).toMatch(/no supported key share groups/);
         }
     });
 
