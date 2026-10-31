@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { NobleMlKem768Backend } from "@browsercore/crypto";
 import { createTestCryptoProvider } from "./test-helpers.js";
 
 const crypto = createTestCryptoProvider();
@@ -17,6 +18,14 @@ import { TlsHandshakeError } from "../src/errors.js";
 import { ExtensionType, namedGroupToWire } from "../src/extensions/extensions.js";
 import { TLS_1_3 } from "../src/types.js";
 import type { KeyPair, ServerHello } from "../src/handshake/handshake.js";
+
+/** Concatenate two byte arrays (mirrors generateKeyShares' hybrid layout). */
+function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
+    const out = new Uint8Array(a.length + b.length);
+    out.set(a, 0);
+    out.set(b, a.length);
+    return out;
+}
 
 /** Build a ServerHello whose extensions block contains one key_share entry. */
 function serverHelloWithKeyShare(groupWire: number, serverPublicKey: Uint8Array): ServerHello {
@@ -29,8 +38,8 @@ function serverHelloWithKeyShare(groupWire: number, serverPublicKey: Uint8Array)
     ksBody.set(serverPublicKey, 4);
     // Wrap in a length-prefixed extensions block.
     const ext = new Uint8Array(2 + 2 + 2 + ksBody.length);
-    ext[0] = 0x00;
-    ext[1] = (2 + 2 + ksBody.length) & 0xff; // extensions_len (fits in low byte)
+    ext[0] = ((2 + 2 + ksBody.length) >> 8) & 0xff;
+    ext[1] = (2 + 2 + ksBody.length) & 0xff;
     ext[2] = (ExtensionType.KEY_SHARE >> 8) & 0xff;
     ext[3] = ExtensionType.KEY_SHARE & 0xff;
     ext[4] = (ksBody.length >> 8) & 0xff;
@@ -190,21 +199,34 @@ describe("computeSharedSecret", () => {
         }
     });
 
-    it("falls back to x25519 when server selects X25519MLKEM768 (0x11ec)", () => {
-        // Post-quantum hybrid groups are advertised for fingerprint compatibility
-        // but the crypto backend has no PQ support. The code falls back to the
-        // classical x25519 half and computes the shared secret normally.
-        const client = crypto.x25519GenerateKeyPair();
-        const peer = crypto.x25519GenerateKeyPair();
-        const expectedSecret = crypto.x25519SharedSecret(client.secretKey, peer.publicKey);
+    it("computes the real hybrid secret when the server selects X25519MLKEM768 (0x11ec)", () => {
+        // The server's key_exchange is 32-byte X25519 public || ML-KEM-768
+        // ciphertext; the hybrid shared secret is x25519_ss || mlkem_ss
+        // (draft-ietf-tls-ecdhe-mlkem). The server side is simulated with the
+        // noble backend's encapsulate against the client's ML-KEM public key.
+        const classical = crypto.x25519GenerateKeyPair();
+        const pq = crypto.mlkem768GenerateKeyPair();
+        const serverKem = new NobleMlKem768Backend();
+        const encapsulated = serverKem.encapsulate(pq.publicKey);
+        const peerX25519 = crypto.x25519GenerateKeyPair();
+        const classicalSecret = crypto.x25519SharedSecret(classical.secretKey, peerX25519.publicKey);
 
+        // Wire layout (matches OpenSSL): ciphertext/ek FIRST, x25519 second.
         const keyPairs: KeyPair[] = [
-            { algorithm: "x25519", privateKey: client.secretKey, publicKey: client.publicKey },
+            {
+                algorithm: "X25519MLKEM768",
+                privateKey: concatBytes(pq.secretKey, classical.secretKey),
+                publicKey: concatBytes(pq.publicKey, classical.publicKey),
+            },
         ];
-        // Server sends x25519 key share but with X25519MLKEM768 wire value (0x11ec)
-        const sh = serverHelloWithKeyShare(0x11ec, peer.publicKey);
+        const serverShare = concatBytes(encapsulated.ciphertext, peerX25519.publicKey);
+        const sh = serverHelloWithKeyShare(0x11ec, serverShare);
         const secret = computeSharedSecret(sh, keyPairs, crypto);
-        expect(secret).toEqual(expectedSecret);
+
+        expect(secret.length).toBe(64);
+        // Post-quantum half first (draft-ietf-tls-ecdhe-mlkem).
+        expect(secret.subarray(0, 32)).toEqual(encapsulated.sharedSecret);
+        expect(secret.subarray(32)).toEqual(classicalSecret);
     });
 
     it("falls back to x25519 when server selects X25519Kyber768 (0x6399)", () => {

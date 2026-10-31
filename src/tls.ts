@@ -77,6 +77,14 @@ export async function connectTls(options: TlsOptions): Promise<TlsConnection> {
     return conn;
 }
 
+/** Concatenate two byte arrays (helper for hybrid key share construction). */
+function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
+    const out = new Uint8Array(a.length + b.length);
+    out.set(a, 0);
+    out.set(b, a.length);
+    return out;
+}
+
 /** Generate key shares for the requested groups (delegates to @browsercore/crypto). */
 export function generateKeyShares(groups: readonly string[], provider: CryptoProvider): Promise<KeyPair[]> {
     // Wrapped in .then() so a synchronous throw (unsupported group) becomes a
@@ -85,16 +93,33 @@ export function generateKeyShares(groups: readonly string[], provider: CryptoPro
         const shares: KeyPair[] = [];
         for (const group of groups) {
             switch (group) {
-                // Post-quantum hybrid groups (RFC 8446 §4.2.7 + hybrid design).
-                // The crypto backend has no PQ support, so we generate a
-                // classical X25519 key but TAG it with the hybrid group name.
-                // This lets the key_share extension emit the correct group ID
-                // (0x11ec for X25519MLKEM768) for fingerprint compatibility.
-                // The server will typically select regular X25519 for the
-                // actual exchange; if it selects the hybrid, computeSharedSecret
-                // falls back to the X25519 half.
-                case "X25519Kyber768":
+                // X25519MLKEM768 (draft-ietf-tls-ecdhe-mlkem): a REAL hybrid
+                // key share. The key_share entry carries the 1184-byte ML-KEM-768
+                // encapsulation key FOLLOWED BY the 32-byte X25519 public key
+                // (1216 bytes total — verified byte-for-byte against OpenSSL's
+                // own ClientHello; the ek comes first). The key pair's secret is
+                // likewise mlkem_secret || x25519_secret so computeSharedSecret
+                // can split it when the server selects the hybrid. Sending a
+                // classical-only key under the hybrid group id (the pre-0.4.13
+                // behavior) produces a structurally invalid share that strict
+                // peers reject with decode_error.
                 case "X25519MLKEM768": {
+                    const classical = provider.x25519GenerateKeyPair();
+                    const pq = provider.mlkem768GenerateKeyPair();
+                    shares.push({
+                        algorithm: group as KeyPair["algorithm"],
+                        privateKey: concatBytes(pq.secretKey, classical.secretKey),
+                        publicKey: concatBytes(pq.publicKey, classical.publicKey),
+                    });
+                    break;
+                }
+                // KNOWN LIMITATION: X25519Kyber768 still advertises a
+                // classical-only share under the hybrid group id (32 bytes
+                // instead of 1216) for fingerprint compatibility. Lenient
+                // servers skip to the next offered group; strict ones reject
+                // the ClientHello. Chrome profiles that need it (chrome-128)
+                // should migrate to X25519MLKEM768.
+                case "X25519Kyber768": {
                     const kp = provider.x25519GenerateKeyPair();
                     shares.push({
                         algorithm: group as KeyPair["algorithm"],
@@ -117,13 +142,15 @@ export function generateKeyShares(groups: readonly string[], provider: CryptoPro
                     break;
                 }
                 default:
-                    // @browsercore/crypto only exposes X25519 and the two NIST ECDH
-                    // curves today. Any other (EC)DHE group would need a backend we
-                    // do not have — fail fast and typed rather than producing a
-                    // bogus key.
-                    throw new TlsHandshakeError("client_hello", {
-                        cause: new Error(`key share group "${group}" is not supported by the crypto backend`),
-                    });
+                    // @browsercore/crypto only exposes X25519 and the two NIST
+                    // ECDH curves today. Groups without a backend (secp521r1,
+                    // FFDHE, x448, …) are SKIPPED rather than fatal: real
+                    // browsers advertise more groups in supported_groups than
+                    // they send shares for, and `supported_groups` keeps the
+                    // full profile list so the fingerprint is unaffected. A
+                    // hard failure here made whole profiles (firefox-128 with
+                    // its secp521r1/ffdhe groups) unusable end-to-end.
+                    break;
             }
         }
         return shares;
@@ -199,6 +226,8 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
     private applicationSecrets!: ApplicationTrafficSecrets;
     private clientAppSeq = 0;
     private serverAppSeq = 0;
+    /** Serializes encrypted-record writes — see {@link enqueueWrite}. */
+    private writeChain: Promise<unknown> = Promise.resolve();
 
     /** Decrypted application payloads awaiting consumption by read(). */
     private appReadQueue: Uint8Array[] = [];
@@ -343,7 +372,32 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
         }
     }
 
-    public async write(data: Uint8Array): Promise<void> {
+    public write(data: Uint8Array): Promise<void> {
+        return this.enqueueWrite(() => this.writeAppData(data));
+    }
+
+    /**
+     * Serialize every encrypted-record write through one promise chain.
+     *
+     * TLS 1.3 record sequence numbers are write-order-critical: concurrent
+     * callers that interleave would read the same `clientAppSeq` before either
+     * increments it, producing duplicate nonces that peers reject with
+     * `bad_record_mac`. Real HTTP/2 stacks do write concurrently (e.g. the
+     * connection preface fires SETTINGS and WINDOW_UPDATE without awaiting
+     * each other), so the chain is not optional.
+     */
+    private enqueueWrite<T>(op: () => Promise<T>): Promise<T> {
+        const run = this.writeChain.then(op, op);
+        // Keep the chain alive regardless of whether this write succeeded.
+        // Both branches return a value so the chain never rejects.
+        this.writeChain = run.then(
+            () => true,
+            () => false,
+        );
+        return run;
+    }
+
+    private async writeAppData(data: Uint8Array): Promise<void> {
         try {
             ensureOpen(this.state);
             const traffic = this.applicationSecrets.client;
@@ -376,20 +430,24 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
         }
         // Send close_notify under the current (application) traffic keys, then
         // tear down the transport. Best-effort: a failing alert must not mask the
-        // close itself.
+        // close itself. Queued behind any pending application writes so the
+        // record sequence stays consistent.
         if (this.state.state === "open") {
             try {
-                const alert = new Uint8Array([0x01, 0x00]); // warning / close_notify
-                await writeEncryptedRecord(
-                    this.transport,
-                    this.aead,
-                    this.applicationSecrets.client,
-                    ContentType.ALERT,
-                    alert,
-                    this.clientAppSeq,
-                    this.crypto,
-                    this.onDebug,
-                );
+                await this.enqueueWrite(async () => {
+                    const alert = new Uint8Array([0x01, 0x00]); // warning / close_notify
+                    await writeEncryptedRecord(
+                        this.transport,
+                        this.aead,
+                        this.applicationSecrets.client,
+                        ContentType.ALERT,
+                        alert,
+                        this.clientAppSeq,
+                        this.crypto,
+                        this.onDebug,
+                    );
+                    this.clientAppSeq++;
+                });
             } catch {
                 // ignore — we are closing anyway
             }
@@ -480,17 +538,19 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
                 );
                 this.clientHsSeq++;
             } else if (this.state.state === "open") {
-                await writeEncryptedRecord(
-                    this.transport,
-                    this.aead,
-                    this.applicationSecrets.client,
-                    ContentType.ALERT,
-                    alertBody,
-                    this.clientAppSeq,
-                    this.crypto,
-                    this.onDebug,
-                );
-                this.clientAppSeq++;
+                await this.enqueueWrite(async () => {
+                    await writeEncryptedRecord(
+                        this.transport,
+                        this.aead,
+                        this.applicationSecrets.client,
+                        ContentType.ALERT,
+                        alertBody,
+                        this.clientAppSeq,
+                        this.crypto,
+                        this.onDebug,
+                    );
+                    this.clientAppSeq++;
+                });
             }
             // If neither condition holds (e.g. connecting state, before keys
             // derived), we cannot encrypt — skip silently. Best-effort by design.

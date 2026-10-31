@@ -9,7 +9,7 @@
  * them together.
  */
 
-import type { CryptoProvider, HashId } from "@browsercore/crypto";
+import { MLKEM768_CIPHERTEXT_LENGTH, MLKEM768_SECRET_KEY_LENGTH, type CryptoProvider, type HashId } from "@browsercore/crypto";
 import type { KeyPair } from "../types.js";
 import type { ServerHello } from "../handshake/handshake.js";
 import { TlsHandshakeError } from "../errors.js";
@@ -51,12 +51,45 @@ export function computeSharedSecret(serverHello: ServerHello, keyPairs: readonly
         });
     }
     const serverPublicKey = keyShare.data.subarray(4, 4 + keyLen);
-    // Post-quantum hybrid groups (X25519MLKEM768, X25519Kyber768) are advertised
-    // in supported_groups and key_share for fingerprint compatibility, but the
-    // crypto backend has no post-quantum support. When a server selects one, we
-    // look up the hybrid-tagged key pair (which holds an X25519 key) and perform
-    // the classical X25519 exchange against the server's classical key share.
-    const isHybrid = group === "X25519MLKEM768" || group === "X25519Kyber768";
+    // X25519MLKEM768 (draft-ietf-tls-ecdhe-mlkem): the server's key_exchange
+    // is the 1184-byte ML-KEM-768 ciphertext FOLLOWED BY the 32-byte X25519
+    // public key (the encapsulation key comes first on the wire). The hybrid
+    // shared secret is x25519_ss || mlkem_ss — computed by the provider in one
+    // call. Our hybrid-tagged key pair carries privateKey =
+    // mlkem_secret || x25519_secret (see generateKeyShares).
+    if (group === "X25519MLKEM768") {
+        const myPair = keyPairs.find((kp) => kp.algorithm === group);
+        if (myPair === undefined) {
+            throw new TlsHandshakeError("server_hello", {
+                cause: new Error(`server selected key share group ${group} we did not offer`),
+            });
+        }
+        if (serverPublicKey.length !== 32 + MLKEM768_CIPHERTEXT_LENGTH) {
+            throw new TlsHandshakeError("server_hello", {
+                cause: new Error(
+                    `X25519MLKEM768 server share has unexpected length ${serverPublicKey.length} (expected ${32 + MLKEM768_CIPHERTEXT_LENGTH})`,
+                ),
+            });
+        }
+        if (myPair.privateKey.length !== 32 + MLKEM768_SECRET_KEY_LENGTH) {
+            throw new TlsHandshakeError("server_hello", {
+                cause: new Error(
+                    `X25519MLKEM768 local key pair has unexpected secret length ${myPair.privateKey.length} (expected ${32 + MLKEM768_SECRET_KEY_LENGTH}) — regenerate with a provider that supports ML-KEM-768`,
+                ),
+            });
+        }
+        return provider.x25519MLKEM768SharedSecret(
+            myPair.privateKey.subarray(MLKEM768_SECRET_KEY_LENGTH),
+            serverPublicKey.subarray(MLKEM768_CIPHERTEXT_LENGTH),
+            myPair.privateKey.subarray(0, MLKEM768_SECRET_KEY_LENGTH),
+            serverPublicKey.subarray(0, MLKEM768_CIPHERTEXT_LENGTH),
+        );
+    }
+    // KNOWN LIMITATION: X25519Kyber768 shares are advertised as classical-only
+    // X25519 keys (see generateKeyShares). If a server selects the hybrid we
+    // can only fall back to the classical exchange — the derived secret will
+    // not match a real ML-KEM peer, so such handshakes fail downstream.
+    const isHybrid = group === "X25519Kyber768";
     const exchangeGroup = isHybrid ? "x25519" : group;
     // Prefer a key pair tagged with the actual negotiated group (handles both
     // the hybrid case, where we tag as the hybrid name, and the direct case).

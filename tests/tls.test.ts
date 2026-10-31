@@ -185,18 +185,17 @@ describe("generateKeyShares", () => {
         expect(shares.map((s) => s.algorithm)).toEqual(["x25519", "secp256r1", "secp384r1"]);
     });
 
-    it("rejects any group the crypto backend cannot generate", async () => {
-        // The crypto backend only exposes X25519 and the two NIST ECDH curves —
-        // other (EC)DHE groups fail fast with a typed handshake error rather than
-        // a bogus key.
-        await expect(generateKeyShares(["x448"], crypto)).rejects.toThrow(TlsHandshakeError);
-        try {
-            await generateKeyShares(["x448"], crypto);
-        } catch (e) {
-            const err = e as TlsHandshakeError;
-            expect(err.phase).toBe("client_hello");
-            expect(err.cause?.message).toMatch(/not supported by the crypto backend/);
-        }
+    it("skips groups the crypto backend cannot generate", async () => {
+        // The crypto backend only exposes X25519 and the two NIST ECDH curves.
+        // Groups without a backend (x448, secp521r1, FFDHE, …) are skipped —
+        // real browsers advertise more groups in supported_groups than they
+        // send key shares for. A profile whose groups are ALL unsupported
+        // still fails downstream ("no supported key share groups").
+        const shares = await generateKeyShares(["x448", "secp521r1", "ffdhe2048"], crypto);
+        expect(shares).toEqual([]);
+        // Mixed: supported groups still produce shares.
+        const mixed = await generateKeyShares(["x448", "x25519", "secp384r1"], crypto);
+        expect(mixed.map((s) => s.algorithm)).toEqual(["x25519", "secp384r1"]);
     });
 });
 

@@ -33,7 +33,7 @@ import {
     DecryptError,
     UnsupportedAlgorithmError,
 } from "@browsercore/crypto";
-import type { X25519Backend } from "@browsercore/crypto";
+import { NobleMlKem768Backend, type MLKEM768KeyPair, type X25519Backend } from "@browsercore/crypto";
 import type {
     CryptoProvider,
     EcdhCurve,
@@ -221,6 +221,7 @@ function ecdhCurveToNode(curve: EcdhCurve): string {
  */
 export function createTestCryptoProvider(
     x25519Backend: X25519Backend = new NobleX25519Backend(),
+    mlkem768Backend: NobleMlKem768Backend = new NobleMlKem768Backend(),
 ): CryptoProvider {
     return {
         randomBytes(length: number): Uint8Array {
@@ -273,6 +274,27 @@ export function createTestCryptoProvider(
         },
         x25519SharedSecret(secretKey: Uint8Array, peerPublicKey: Uint8Array): Uint8Array {
             return x25519Backend.sharedSecret(secretKey, peerPublicKey);
+        },
+        mlkem768GenerateKeyPair(): MLKEM768KeyPair {
+            return mlkem768Backend.generateKeyPair();
+        },
+        mlkem768Decapsulate(secretKey: Uint8Array, ciphertext: Uint8Array): Uint8Array {
+            return mlkem768Backend.decapsulate(secretKey, ciphertext);
+        },
+        x25519MLKEM768SharedSecret(
+            x25519SecretKey: Uint8Array,
+            x25519PeerPublicKey: Uint8Array,
+            mlkemSecretKey: Uint8Array,
+            mlkemCiphertext: Uint8Array,
+        ): Uint8Array {
+            // draft-ietf-tls-ecdhe-mlkem: ML-KEM shared secret || X25519
+            // shared secret (post-quantum first).
+            const postQuantum = mlkem768Backend.decapsulate(mlkemSecretKey, mlkemCiphertext);
+            const classical = x25519Backend.sharedSecret(x25519SecretKey, x25519PeerPublicKey);
+            const hybrid = new Uint8Array(classical.length + postQuantum.length);
+            hybrid.set(postQuantum, 0);
+            hybrid.set(classical, postQuantum.length);
+            return hybrid;
         },
         ecdhGenerateKeyPair(curve: EcdhCurve): EcdhKeyPair {
             const ecdh = createECDH(ecdhCurveToNode(curve));
