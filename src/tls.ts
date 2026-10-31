@@ -20,7 +20,7 @@
  * this file focused on the public surface.
  */
 
-import type { EventProvider } from "@browsercore/contracts";
+import type { CompressionProvider, EventProvider } from "@browsercore/contracts";
 import type { CryptoProvider, HashId } from "@browsercore/crypto";
 import type { Transport } from "@browsercore/transport";
 import {
@@ -76,6 +76,9 @@ export async function connectTls(options: TlsOptions): Promise<TlsConnection> {
     await conn.handshake();
     return conn;
 }
+
+/** compress_certificate extension type code (RFC 8879). */
+const COMPRESS_CERTIFICATE_EXT = 27;
 
 /** Concatenate two byte arrays (helper for hybrid key share construction). */
 function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
@@ -228,6 +231,8 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
     private serverAppSeq = 0;
     /** Serializes encrypted-record writes — see {@link enqueueWrite}. */
     private writeChain: Promise<unknown> = Promise.resolve();
+    /** Compression provider for RFC 8879 (undefined = ext 27 stripped below). Part of HandshakeContext. */
+    public readonly compression: CompressionProvider | undefined;
 
     /** Decrypted application payloads awaiting consumption by read(). */
     private appReadQueue: Uint8Array[] = [];
@@ -266,11 +271,26 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
             this.trustAnchors = options.trustAnchors ?? [];
             this.onDebug = options.onDebug;
 
+            this.compression = options.compression;
+            // RFC 8879: advertising compress_certificate obligates the client to
+            // decompress a CompressedCertificate reply. Without an injected
+            // provider we cannot, so strip ext 27 and let the server send plain
+            // DER — never advertise what we cannot honor.
+            const baseProfile =
+                options.compression === undefined &&
+                options.profile.extensionOrder.includes(COMPRESS_CERTIFICATE_EXT)
+                    ? {
+                          ...options.profile,
+                          extensionOrder: options.profile.extensionOrder.filter(
+                              (ext) => ext !== COMPRESS_CERTIFICATE_EXT,
+                          ),
+                      }
+                    : options.profile;
             // An explicit alpnProtocols option overrides whatever the profile says.
             this.profile =
                 options.alpnProtocols !== undefined && options.alpnProtocols.length > 0
-                    ? { ...options.profile, alpnProtocols: options.alpnProtocols }
-                    : options.profile;
+                    ? { ...baseProfile, alpnProtocols: options.alpnProtocols }
+                    : baseProfile;
         }
     }
 

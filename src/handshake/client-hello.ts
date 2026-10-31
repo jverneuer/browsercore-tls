@@ -303,18 +303,13 @@ function encodeExtensionBody(
         case ExtensionType.APPLICATION_SETTINGS_OLD:
             return encodeApplicationSettings(config.alpnProtocols);
         case ExtensionType.ENCRYPTED_CLIENT_HELLO:
-            // No HPKE keys for real ECH; emit an empty body as a placeholder.
-            // The fetch layer filters this out of extensionOrder before connecting.
-            return new Uint8Array(0);
+            return encodeEchGrease(provider);
         case ExtensionType.SIGNED_CERTIFICATE_TIMESTAMP:
             return new Uint8Array(0);
         case ExtensionType.EXTENDED_MASTER_SECRET:
             return new Uint8Array(0);
         case ExtensionType.COMPRESS_CERTIFICATE:
-            // Skip — we have no certificate decompression code (RFC 8879).
-            // Advertising it causes servers to respond with CompressedCertificate
-            // (type 25) which our parser can't handle.
-            return undefined;
+            return encodeCompressCertificate();
         case ExtensionType.SESSION_TICKET:
             return new Uint8Array(0);
         case ExtensionType.PRE_SHARED_KEY:
@@ -430,6 +425,50 @@ function encodePskKeyExchangeModes(): Uint8Array {
 
 function encodeStatusRequest(): Uint8Array {
     return new Uint8Array([0x01, 0x00, 0x00, 0x00, 0x00]);
+}
+
+/**
+ * ECH GREASE — byte-shape replicated from real Chrome 131 and Firefox 133
+ * wire captures (browsercore-testing captures, tls/client_hello.bin per profile):
+ *
+ *   00 00 01 00 01 <1 random> | 00 20 <32 random enc> | <2B len> <random payload>
+ *
+ * Both browsers emit exactly this shape (218 bytes total for Chrome, 186 for
+ * Firefox — only the payload length differs). The middle fields are opaque to
+ * any observer: a real client HPKE-seals a dummy inner ClientHello with an
+ * ephemeral key, so the enc/payload bytes are ciphertext that never repeats.
+ * Matching the observed shape is what strict ECH-aware edges
+ * (Cloudflare/BoringSSL) accept; a spec-shaped body with an empty enc gets
+ * the ClientHello rejected with decode_error. JA3/JA4 hash only the extension
+ * type code, so the goal here is server acceptance with fresh randomness.
+ */
+function encodeEchGrease(provider: CryptoProvider): Uint8Array {
+    const enc = provider.randomBytes(32);
+    const payload = provider.randomBytes(176);
+    const body = new Uint8Array(6 + 2 + enc.length + 2 + payload.length);
+    body.set([0x00, 0x00, 0x01, 0x00, 0x01], 0);
+    const jitter = provider.randomBytes(1)[0];
+    /* v8 ignore next -- randomBytes(1) always yields a byte */
+    body[5] = jitter ?? 0x00;
+    body[6] = 0x00; // enc length: 32
+    body[7] = 0x20;
+    body.set(enc, 8);
+    const o = 8 + enc.length;
+    body[o] = (payload.length >> 8) & 0xff;
+    body[o + 1] = payload.length & 0xff;
+    body.set(payload, o + 2);
+    return body;
+}
+
+/**
+ * compress_certificate (RFC 8879) — advertise exactly what real Chrome
+ * advertises: one algorithm, brotli (0x0002). Byte-identical to the golden
+ * chrome-131 capture (`02 00 02`). Honored at the Certificate stage via the
+ * injected CompressionProvider (see CompressedCertificate handling); the
+ * caller strips ext 27 when no provider is injected.
+ */
+function encodeCompressCertificate(): Uint8Array {
+    return new Uint8Array([0x02, 0x00, 0x02]);
 }
 
 function encodeRenegotiationInfo(): Uint8Array {

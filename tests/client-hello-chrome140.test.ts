@@ -54,13 +54,13 @@ const CHROME140_EXTENSION_ORDER = [
 ];
 
 /**
- * Extensions actually emitted on the wire. compress_certificate (27) and
- * pre_shared_key (41) are intentionally skipped (no certificate decompression
- * code; no PSK identities to offer), so they are filtered out of the emitted
- * set even though the profile still lists them in extensionOrder.
+ * Extensions actually emitted on the wire. compress_certificate (27) IS
+ * emitted (RFC 8879 with an injected CompressionProvider — body `02 00 02`,
+ * byte-identical to the golden chrome-131 capture). pre_shared_key (41) is
+ * still skipped: no PSK identities to offer.
  */
 const CHROME140_EMITTED_EXTENSIONS = CHROME140_EXTENSION_ORDER.filter(
-    (t) => t !== ExtensionType.COMPRESS_CERTIFICATE && t !== ExtensionType.PRE_SHARED_KEY,
+    (t) => t !== ExtensionType.PRE_SHARED_KEY,
 );
 
 function chrome140Config(): ClientHelloConfig {

@@ -6,7 +6,9 @@
  * but NEVER imports node:crypto directly — that boundary is @browsercore/crypto's job.
  */
 
-import type { EventProvider } from "@browsercore/contracts";
+import type { CompressionProvider, EventProvider } from "@browsercore/contracts";
+
+export type { CompressionProvider };
 import type { CryptoProvider } from "@browsercore/crypto";
 import type { Transport } from "@browsercore/transport";
 import type { TlsError } from "./errors.js";
@@ -235,6 +237,14 @@ export interface TlsOptions {
      * or a custom/fake provider for testing or to swap the backend (WebCrypto, HSM).
      */
     readonly crypto: CryptoProvider;
+    /**
+     * Compression provider. OPTIONAL — required only to HONOR a profile that
+     * advertises compress_certificate (ext 27, RFC 8879): servers that accept it
+     * answer with a CompressedCertificate (type 25) that must be decompressed
+     * before chain validation. When omitted, ext 27 is stripped from the
+     * ClientHello so the server never compresses.
+     */
+    readonly compression?: CompressionProvider;
     /**
      * Event provider backend. REQUIRED — pure dependency injection, no fallback.
      * Decouples the connection from node:events so the backend is swappable
