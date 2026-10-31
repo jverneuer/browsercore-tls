@@ -10,6 +10,7 @@
  */
 
 import type { CryptoProvider, HashId } from "@browsercore/crypto";
+import type { CompressionProvider } from "@browsercore/contracts";
 import type { Transport } from "@browsercore/transport";
 import type { TrafficSecrets } from "../types.js";
 import { TlsHandshakeError } from "../errors.js";
@@ -19,6 +20,85 @@ import { ContentType, decryptRecord, type encryptRecord, readContentType } from 
 import { parseCertificate, validateHostname, verifyChain, type Certificate, type CertificateChain, type TrustAnchor } from "../certificates/certificates.js";
 import { transcriptHash } from "./key-exchange.js";
 import { readHeaderBytes as readHeaderBytesFromRecord, readRawRecord as readRawRecordFromRecord, xorNonce } from "./record-layer.js";
+
+/** Extract the negotiated certificate-compression algorithm (RFC 8879) from EncryptedExtensions, if any. */
+export function parseCertCompressionFromEncryptedExtensions(body: Uint8Array): number | undefined {
+    const extensions = parseExtensions(body);
+    const ext = findExtension(extensions, ExtensionType.COMPRESS_CERTIFICATE);
+    if (ext === undefined || ext.data.length < 2) {
+        return undefined;
+    }
+    const a = ext.data[0];
+    const b = ext.data[1];
+    if (a === undefined || b === undefined) {
+        return undefined;
+    }
+    return (a << 8) | b;
+}
+
+/**
+ * Expand a CompressedCertificate message (RFC 8879, handshake type 25) back
+ * into a plain Certificate message body.
+ *
+ * Verified wire layout (Cloudflare/BoringSSL + OpenSSL): the type-25 body is
+ * the CompressedCertificate structure ALONE — no certificate_request_context
+ * prefix (server contexts are always empty and senders omit it):
+ *
+ *   algorithm (2) | uncompressed_length (3) | compressed<1..2^24-1> (3-byte length)
+ *
+ * The compressed bytes decode to the original certificate_list (3-byte length
+ * + entries). Only brotli (0x0002) is advertised by the ClientHello encoder;
+ * anything else is a protocol violation.
+ */
+export function expandCompressedCertificate(
+    body: Uint8Array,
+    compression: CompressionProvider,
+): Uint8Array {
+    if (body.length < 8) {
+        throw new TlsHandshakeError("certificate", {
+            cause: new Error(`CompressedCertificate truncated (${body.length} bytes, need 8)`),
+        });
+    }
+    const alg = (body[0]! << 8) | body[1]!;
+    const uncompressedLength = (body[2]! << 16) | (body[3]! << 8) | body[4]!;
+    const compressedLength = (body[5]! << 16) | (body[6]! << 8) | body[7]!;
+    if (8 + compressedLength !== body.length) {
+        throw new TlsHandshakeError("certificate", {
+            cause: new Error(
+                `CompressedCertificate length mismatch: body is ${body.length} bytes, header declares ${8 + compressedLength}`,
+            ),
+        });
+    }
+    if (alg !== 0x0002) {
+        throw new TlsHandshakeError("certificate", {
+            cause: new Error(
+                `server selected certificate compression algorithm 0x${alg.toString(16)} but only brotli (0x0002) is advertised`,
+            ),
+        });
+    }
+    const compressed = body.subarray(8);
+    let certificateBody: Uint8Array;
+    try {
+        certificateBody = compression.brotliDecompress(compressed);
+    } catch (cause) {
+        throw new TlsHandshakeError("certificate", {
+            cause: new Error("brotli decompression of CompressedCertificate failed", cause instanceof Error ? { cause } : undefined),
+        });
+    }
+    if (certificateBody.length !== uncompressedLength) {
+        throw new TlsHandshakeError("certificate", {
+            cause: new Error(
+                `CompressedCertificate expanded to ${certificateBody.length} bytes but the server declared ${uncompressedLength}`,
+            ),
+        });
+    }
+    // The compressed payload is the COMPLETE plain Certificate body —
+    // certificate_request_context (1-byte length, empty for servers) followed
+    // by certificate_list (3-byte length + entries). Verified against
+    // Cloudflare: the decompressed stream starts `00 | 00 10 bb | ...` where
+    // the leading 00 IS the context and 0x10bb the list length.
+    return certificateBody;
+}
 
 /** Extract the negotiated ALPN protocol from EncryptedExtensions, if any. */
 export function parseAlpnFromEncryptedExtensions(body: Uint8Array): string | undefined {

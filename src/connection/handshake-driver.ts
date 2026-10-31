@@ -15,6 +15,7 @@
 
 import type { Transport } from "@browsercore/transport";
 import type { CryptoProvider, HashId } from "@browsercore/crypto";
+import type { CompressionProvider } from "@browsercore/contracts";
 import { TlsHandshakeError, type AlertLevel, type HandshakePhase as TimeoutPhase } from "../errors.js";
 import { ContentType, cipherSuiteToAead } from "../record/record.js";
 import {
@@ -58,6 +59,8 @@ import {
     splitHandshakeMessages,
     validateCertificateChain,
     verifyCertificateVerify,
+    expandCompressedCertificate,
+    parseCertCompressionFromEncryptedExtensions,
 } from "./handshake-messages.js";
 import {
     readHeaderBytes,
@@ -74,6 +77,12 @@ export interface HandshakeContext {
     readonly transport: Transport;
     /** Cryptographic provider, injected by the owning connection (no default). */
     crypto: CryptoProvider;
+    /**
+     * Compression provider for RFC 8879 CompressedCertificate (type 25).
+     * Undefined when the connection did not advertise compress_certificate —
+     * the server must then never send a compressed certificate.
+     */
+    compression: CompressionProvider | undefined;
     /** Mutable: buffered bytes not yet consumed by the record framer. */
     readBuffer: Uint8Array;
     /** Mutable: running transcript of full handshake messages. */
@@ -422,36 +431,46 @@ async function consumeServerFlight(
     if (alpn !== undefined) {
         ctx.alpnProtocol = alpn;
     }
-    ctx.onDebug?.(`consumeServerFlight: EncryptedExtensions consumed (alpn=${alpn ?? "none"})`);
+    const certCompression = parseCertCompressionFromEncryptedExtensions(message.body);
+    ctx.onDebug?.(
+        `consumeServerFlight: EncryptedExtensions consumed (alpn=${alpn ?? "none"}, certCompression=${certCompression === undefined ? "none" : `0x${certCompression.toString(16)}`})`,
+    );
 
     // Certificate.
     ctx.currentPhase = "certificate";
     ctx.onDebug?.("consumeServerFlight: expecting Certificate");
     message = await nextHandshakeMessage();
+    let certificateBody = message.body;
     if (message.whole[0] === HandshakeType.COMPRESSED_CERTIFICATE) {
-        // RFC 8879: a server sends CompressedCertificate (type 25) only when the
-        // client advertised compress_certificate (ext 27). We never advertise it,
-        // so this means a non-conformant server or a ClientHello that was modified
-        // in transit (e.g. a CDN injecting the extension). Provide an actionable
-        // error so the operator can diagnose the root cause.
-        throw new TlsHandshakeError("certificate", {
-            cause: new Error(
-                "server sent a CompressedCertificate (RFC 8879, type 25) but this client did not advertise " +
-                    "compress_certificate (ext 27). The server is non-conformant or a middlebox injected the " +
-                    "extension. If ext 27 is in the profile extensionOrder, remove it.",
-            ),
-        });
+        // RFC 8879: expand the compressed certificate_list before chain
+        // validation. The TRANSCRIPT keeps the original compressed wire bytes —
+        // CertificateVerify signs the message as sent, not as decompressed.
+        if (ctx.compression === undefined) {
+            throw new TlsHandshakeError("certificate", {
+                cause: new Error(
+                    "server sent a CompressedCertificate (RFC 8879, type 25) but no compression provider was " +
+                        "injected, so the ClientHello did not advertise compress_certificate (ext 27). " +
+                        "The server is non-conformant or a middlebox injected the extension.",
+                ),
+            });
+        }
+        phase = advanceHandshake(phase, HandshakeType.CERTIFICATE);
+        ctx.transcript.push(message.whole);
+        certificateBody = expandCompressedCertificate(message.body, ctx.compression);
+        ctx.onDebug?.("consumeServerFlight: CompressedCertificate expanded (brotli)");
+    } else {
+        if (message.whole[0] !== HandshakeType.CERTIFICATE) {
+            throw new TlsHandshakeError("certificate", {
+                cause: new Error(
+                    `expected Certificate (type ${HandshakeType.CERTIFICATE}), got handshake type ${message.whole[0]}`,
+                ),
+            });
+        }
+        phase = advanceHandshake(phase, HandshakeType.CERTIFICATE);
+        ctx.transcript.push(message.whole);
+        void certCompression;
     }
-    if (message.whole[0] !== HandshakeType.CERTIFICATE) {
-        throw new TlsHandshakeError("certificate", {
-            cause: new Error(
-                `expected Certificate (type ${HandshakeType.CERTIFICATE}), got handshake type ${message.whole[0]}`,
-            ),
-        });
-    }
-    phase = advanceHandshake(phase, HandshakeType.CERTIFICATE);
-    ctx.transcript.push(message.whole);
-    const chain = await validateCertificateChain(message.body, serverName, trustAnchors, now, ctx.crypto);
+    const chain = await validateCertificateChain(certificateBody, serverName, trustAnchors, now, ctx.crypto);
     ctx.peerCertificate = chain.leaf;
     ctx.onDebug?.(`consumeServerFlight: Certificate validated (${chain.intermediates.length} intermediates)`);
 

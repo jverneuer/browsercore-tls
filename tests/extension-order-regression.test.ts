@@ -93,16 +93,16 @@ describe("Extensions appear in the exact order specified by the profile", () => 
     });
 
     it("emits all profile extensions, not a hardcoded subset of 5", async () => {
-        // chrome-140 lists 16 extensions in extensionOrder, but
-        // compress_certificate (27) and pre_shared_key (41) are intentionally
-        // skipped, so only 14 appear on the wire — all in the profile's order.
+        // chrome-140 lists 16 extensions in extensionOrder; compress_certificate
+        // (27) is emitted since RFC 8879 support landed, so 15 appear on the
+        // wire — only pre_shared_key (41) is skipped. All in profile order.
         const order = [
             0, 10, 11, 13, 16, 17613, 18, 23, 27, 35, 41, 43, 45, 5, 51, 65281,
         ];
-        const emitted = order.filter((t) => t !== ExtensionType.COMPRESS_CERTIFICATE && t !== ExtensionType.PRE_SHARED_KEY);
+        const emitted = order.filter((t) => t !== ExtensionType.PRE_SHARED_KEY);
         const hello = buildClientHello(baseConfig(order, false), await x25519KeyPair(), () => Math.random(), crypto);
         expect(parseExtensionTypes(hello)).toEqual(emitted);
-        expect(parseExtensionTypes(hello)).toHaveLength(14);
+        expect(parseExtensionTypes(hello)).toHaveLength(15);
     });
 
     it("prepends a GREASE extension (0x0a0a) ahead of the profile order when grease=true", async () => {
