@@ -15,7 +15,6 @@
 
 import type { Transport } from "@browsercore/transport";
 import type { CryptoProvider, HashId } from "@browsercore/crypto";
-import type { CompressionProvider } from "@browsercore/contracts";
 import { TlsHandshakeError, type AlertLevel, type HandshakePhase as TimeoutPhase } from "../errors.js";
 import { ContentType, cipherSuiteToAead } from "../record/record.js";
 import {
@@ -61,6 +60,7 @@ import {
     verifyCertificateVerify,
     expandCompressedCertificate,
     parseCertCompressionFromEncryptedExtensions,
+    type BrotliDecompressor,
 } from "./handshake-messages.js";
 import {
     readHeaderBytes,
@@ -82,7 +82,7 @@ export interface HandshakeContext {
      * Undefined when the connection did not advertise compress_certificate —
      * the server must then never send a compressed certificate.
      */
-    compression: CompressionProvider | undefined;
+    compression: BrotliDecompressor | undefined;
     /** Mutable: buffered bytes not yet consumed by the record framer. */
     readBuffer: Uint8Array;
     /** Mutable: running transcript of full handshake messages. */

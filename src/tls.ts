@@ -44,7 +44,6 @@ import { TlsHandshakeError, TlsDecryptError, AlertDescription, ensureTlsError, t
 import { createId } from "./utils.js";
 import { ContentType, type encryptRecord } from "./record/record.js";
 import { HandshakeType, type ServerHello } from "./handshake/handshake.js";
-import { ExtensionType } from "./extensions/extensions.js";
 import {
     ensureOpen,
     handleAlert as handleAlertRecord,
@@ -77,6 +76,9 @@ export async function connectTls(options: TlsOptions): Promise<TlsConnection> {
     await conn.handshake();
     return conn;
 }
+
+/** compress_certificate extension type code (RFC 8879). */
+const COMPRESS_CERTIFICATE_EXT = 27;
 
 /** Concatenate two byte arrays (helper for hybrid key share construction). */
 function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
@@ -276,11 +278,11 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
             // DER — never advertise what we cannot honor.
             const baseProfile =
                 options.compression === undefined &&
-                options.profile.extensionOrder.includes(ExtensionType.COMPRESS_CERTIFICATE)
+                options.profile.extensionOrder.includes(COMPRESS_CERTIFICATE_EXT)
                     ? {
                           ...options.profile,
                           extensionOrder: options.profile.extensionOrder.filter(
-                              (ext) => ext !== ExtensionType.COMPRESS_CERTIFICATE,
+                              (ext) => ext !== COMPRESS_CERTIFICATE_EXT,
                           ),
                       }
                     : options.profile;

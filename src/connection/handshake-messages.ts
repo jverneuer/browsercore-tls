@@ -10,7 +10,6 @@
  */
 
 import type { CryptoProvider, HashId } from "@browsercore/crypto";
-import type { CompressionProvider } from "@browsercore/contracts";
 import type { Transport } from "@browsercore/transport";
 import type { TrafficSecrets } from "../types.js";
 import { TlsHandshakeError } from "../errors.js";
@@ -50,18 +49,42 @@ export function parseCertCompressionFromEncryptedExtensions(body: Uint8Array): n
  * + entries). Only brotli (0x0002) is advertised by the ClientHello encoder;
  * anything else is a protocol violation.
  */
+/**
+ * The slice of {@link CompressionProvider} the certificate path needs —
+ * declared structurally so this module gains no new dependency.
+ */
+export interface BrotliDecompressor {
+    brotliDecompress(data: Uint8Array): Uint8Array;
+}
+
 export function expandCompressedCertificate(
     body: Uint8Array,
-    compression: CompressionProvider,
+    compression: BrotliDecompressor,
 ): Uint8Array {
     if (body.length < 8) {
         throw new TlsHandshakeError("certificate", {
             cause: new Error(`CompressedCertificate truncated (${body.length} bytes, need 8)`),
         });
     }
-    const alg = (body[0]! << 8) | body[1]!;
-    const uncompressedLength = (body[2]! << 16) | (body[3]! << 8) | body[4]!;
-    const compressedLength = (body[5]! << 16) | (body[6]! << 8) | body[7]!;
+    const b0 = body[0];
+    const b1 = body[1];
+    const b2 = body[2];
+    const b3 = body[3];
+    const b4 = body[4];
+    const b5 = body[5];
+    const b6 = body[6];
+    const b7 = body[7];
+    if (
+        b0 === undefined || b1 === undefined || b2 === undefined || b3 === undefined ||
+        b4 === undefined || b5 === undefined || b6 === undefined || b7 === undefined
+    ) {
+        throw new TlsHandshakeError("certificate", {
+            cause: new Error("CompressedCertificate header bytes missing"),
+        });
+    }
+    const alg = (b0 << 8) | b1;
+    const uncompressedLength = (b2 << 16) | (b3 << 8) | b4;
+    const compressedLength = (b5 << 16) | (b6 << 8) | b7;
     if (8 + compressedLength !== body.length) {
         throw new TlsHandshakeError("certificate", {
             cause: new Error(

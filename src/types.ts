@@ -7,6 +7,8 @@
  */
 
 import type { CompressionProvider, EventProvider } from "@browsercore/contracts";
+
+export type { CompressionProvider };
 import type { CryptoProvider } from "@browsercore/crypto";
 import type { Transport } from "@browsercore/transport";
 import type { TlsError } from "./errors.js";
