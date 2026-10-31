@@ -158,3 +158,34 @@ describe("parseCertCompressionFromEncryptedExtensions", () => {
         expect(parseCertCompressionFromEncryptedExtensions(new Uint8Array([0x00, 0x00]))).toBeUndefined();
     });
 });
+
+describe("expandCompressedCertificate error paths", () => {
+    const brotliProvider = {
+        brotliDecompress: (data: Uint8Array): Uint8Array =>
+            new Uint8Array(brotliDecompressSync(Buffer.from(data))),
+    } as unknown as CompressionProvider;
+
+    it("rejects a body shorter than the 8-byte header", () => {
+        expect(() => expandCompressedCertificate(new Uint8Array(4), brotliProvider)).toThrow(/truncated/);
+    });
+
+    it("wraps a non-Error brotli failure", () => {
+        const throwing = {
+            brotliDecompress: (): Uint8Array => {
+                throw "raw failure";
+            },
+        } as unknown as CompressionProvider;
+        const compressed = new Uint8Array(brotliCompressSync(Buffer.from([0x01])));
+        const body = new Uint8Array(8 + compressed.length);
+        body[0] = 0x00;
+        body[1] = 0x02;
+        body[2] = 0x00;
+        body[3] = 0x00;
+        body[4] = 0x01;
+        body[5] = (compressed.length >> 16) & 0xff;
+        body[6] = (compressed.length >> 8) & 0xff;
+        body[7] = compressed.length & 0xff;
+        body.set(compressed, 8);
+        expect(() => expandCompressedCertificate(body, throwing)).toThrow(TlsHandshakeError);
+    });
+});

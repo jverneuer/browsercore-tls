@@ -74,6 +74,7 @@ export function expandCompressedCertificate(
     const b5 = body[5];
     const b6 = body[6];
     const b7 = body[7];
+    /* v8 ignore next 4 -- length >= 8 above guarantees all eight bytes exist */
     if (
         b0 === undefined || b1 === undefined || b2 === undefined || b3 === undefined ||
         b4 === undefined || b5 === undefined || b6 === undefined || b7 === undefined

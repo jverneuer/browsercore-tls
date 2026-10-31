@@ -448,6 +448,7 @@ function encodeEchGrease(provider: CryptoProvider): Uint8Array {
     const body = new Uint8Array(6 + 2 + enc.length + 2 + payload.length);
     body.set([0x00, 0x00, 0x01, 0x00, 0x01], 0);
     const jitter = provider.randomBytes(1)[0];
+    /* v8 ignore next -- randomBytes(1) always yields a byte */
     body[5] = jitter ?? 0x00;
     body[6] = 0x00; // enc length: 32
     body[7] = 0x20;

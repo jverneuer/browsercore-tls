@@ -319,3 +319,37 @@ describe("verifyServerFinished", () => {
         }
     });
 });
+
+describe("computeSharedSecret — X25519MLKEM768 guards", () => {
+    it("rejects when the server selects the hybrid but no hybrid pair was offered", () => {
+        const x = crypto.x25519GenerateKeyPair();
+        const sh = serverHelloWithKeyShare(0x11ec, new Uint8Array(32 + 1088));
+        expect(() =>
+            computeSharedSecret(sh, [{ algorithm: "x25519", privateKey: x.secretKey, publicKey: x.publicKey }], crypto),
+        ).toThrow(/did not offer/);
+    });
+
+    it("rejects a malformed hybrid server share length", async () => {
+        const classical = crypto.x25519GenerateKeyPair();
+        const pq = crypto.mlkem768GenerateKeyPair();
+        const keyPairs = [
+            {
+                algorithm: "X25519MLKEM768",
+                privateKey: concatBytes(pq.secretKey, classical.secretKey),
+                publicKey: concatBytes(pq.publicKey, classical.publicKey),
+            },
+        ];
+        const sh = serverHelloWithKeyShare(0x11ec, new Uint8Array(100)); // wrong length
+        expect(() => computeSharedSecret(sh, keyPairs, crypto)).toThrow(/unexpected length/);
+    });
+
+    it("rejects a hybrid pair whose private key has the wrong length", async () => {
+        const classical = crypto.x25519GenerateKeyPair();
+        const keyPairs = [
+            { algorithm: "X25519MLKEM768", privateKey: new Uint8Array(10), publicKey: new Uint8Array(1216) },
+        ];
+        const sh = serverHelloWithKeyShare(0x11ec, new Uint8Array(32 + 1088));
+        expect(() => computeSharedSecret(sh, keyPairs, crypto)).toThrow(/secret length/);
+        void classical;
+    });
+});
