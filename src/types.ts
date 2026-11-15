@@ -154,6 +154,17 @@ export interface ClientHelloConfig {
     readonly extensionOrder: readonly number[];
     /** Named groups for key share, ordered by preference. */
     readonly keyShareGroups: readonly NamedGroup[];
+    /**
+     * Named groups ADVERTISED in supported_groups, when the advertised set
+     * differs from the groups actually shared in key_share. Real Chrome
+     * advertises secp256r1+secp384r1 in supported_groups while key-sharing only
+     * GREASE+X25519MLKEM768+x25519 (golden chrome-131: supported_groups
+     * `caca|11ec|001d|0017|0018` vs key_share `caca|11ec|001d`). Maps to
+     * @browsercore/profiles `keyShareAdvertisedGroups`. When omitted,
+     * supported_groups is derived from {@link keyShareGroups} (backwards
+     * compatible).
+     */
+    readonly supportedGroups?: readonly NamedGroup[];
     /** Signature algorithms the client accepts in CertificateVerify. */
     readonly signatureAlgorithms: readonly SignatureScheme[];
     /** Protocol versions the client advertises via supported_versions. */

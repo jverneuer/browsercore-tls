@@ -51,6 +51,7 @@ export {
     parseRecordHeader,
     serializeRecordHeader,
     cipherSuiteToAead,
+    CLIENT_HELLO_RECORD_VERSION,
     RECORD_HEADER_SIZE,
 } from "./record/record.js";
 export type { ContentType as TlsContentType, RecordHeader, TlsRecord } from "./record/record.js";

@@ -44,6 +44,16 @@ export const RECORD_HEADER_SIZE = 5 as const;
 export const MAX_PLAINTEXT_FRAGMENT = 16_384 as const;
 
 /**
+ * Legacy record version for the INITIAL ClientHello record (RFC 8446 §5.1).
+ *
+ * The spec allows (and real Chrome sends) TLS 1.0's 0x0301 here — golden
+ * chrome-131 opens with `16 03 01`. Every other record a TLS 1.3 client emits
+ * MUST carry 0x0303, so this is threaded to the initial-ClientHello write site
+ * only; `serializeRecordHeader`'s default stays 0x0303.
+ */
+export const CLIENT_HELLO_RECORD_VERSION = 0x0301 as const;
+
+/**
  * Validate a raw byte as a known {@link ContentType}.
  *
  * Replaces the `raw[0] as ContentType` / `plaintext[end-1] as ContentType`

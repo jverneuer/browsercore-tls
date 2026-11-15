@@ -12,7 +12,7 @@ import { describe, it, expect } from "vitest";
 import { createTestCryptoProvider } from "./test-helpers.js";
 
 const crypto = createTestCryptoProvider();
-import { ContentType, serializeRecordHeader } from "../src/record/record.js";
+import { CLIENT_HELLO_RECORD_VERSION, ContentType, serializeRecordHeader } from "../src/record/record.js";
 import {
     TlsDecryptError,
     TlsHandshakeError,
@@ -181,6 +181,24 @@ describe("writeRecord", () => {
         const out = transport.written[0]!;
         expect(out[0]).toBe(ContentType.HANDSHAKE);
         expect(out.subarray(5)).toEqual(fragment); // after the 5-byte header
+    });
+
+    it("defaults the legacy record version to 0x0303", async () => {
+        const transport = new FakeTransport();
+        await writeRecord(transport, ContentType.HANDSHAKE, new Uint8Array([1]));
+        const out = transport.written[0]!;
+        expect(out[1]).toBe(0x03);
+        expect(out[2]).toBe(0x03);
+    });
+
+    it("honors an explicit legacy record version (initial ClientHello 0x0301)", async () => {
+        // Real Chrome's initial ClientHello record carries TLS 1.0's 0x0301 —
+        // golden chrome-131 opens `16 03 01` (RFC 8446 §5.1 allows exactly
+        // this for the initial ClientHello; every other record keeps 0x0303).
+        const transport = new FakeTransport();
+        await writeRecord(transport, ContentType.HANDSHAKE, new Uint8Array([1]), CLIENT_HELLO_RECORD_VERSION);
+        const out = transport.written[0]!;
+        expect(Array.from(out.subarray(0, 5))).toEqual([0x16, 0x03, 0x01, 0x00, 0x01]);
     });
 });
 
