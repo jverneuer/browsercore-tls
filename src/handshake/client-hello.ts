@@ -31,9 +31,11 @@ const TLS_1_2_WIRE_VERSION = 0x0303;
  * The 16 GREASE sentinels reserved by RFC 8701 §2 (0x?a?a set).
  *
  * Real browsers draw each GREASE slot (cipher suite, extension type, key-share
- * group, …) INDEPENDENTLY and uniformly at random from this set — see the
- * golden chrome-131 capture, which shows cipher 0x5a5a, leading ext 0x4a4a,
- * key_share/supported_groups 0xcaca in a single ClientHello.
+ * group, …) uniformly at random from this set — see the golden chrome-131
+ * capture, which shows cipher 0x5a5a, leading ext 0x4a4a,
+ * key_share/supported_groups 0xcaca in a single ClientHello. Most slots are
+ * drawn independently; the two GROUP slots are structurally coupled (see
+ * `drawGreaseSentinels` — key_share and supported_groups share one value).
  * `generateGreaseValue` draws from here; `isGreaseValue` validates against it.
  * Single source of truth for the reserved set.
  */
@@ -82,13 +84,16 @@ const GREASE_KEY_LENGTH = 1;
 const GREASE_KEY_PAYLOAD = new Uint8Array([0x00]);
 
 /**
- * The independent per-slot GREASE sentinels drawn for one ClientHello.
+ * The per-slot GREASE sentinels drawn for one ClientHello.
  *
- * Real Chrome draws each RFC 8701 slot independently rather than reusing one
- * value per connection (2026-11-15 fingerprint diagnosis, D7): the golden
- * chrome-131 capture shows cipher 0x5a5a, leading ext 0x4a4a,
- * supported_versions 0x4a4a, key_share + supported_groups 0xcaca, trailing ext
- * 0x5a5a — equalities between slots are per-capture coincidence, not structure.
+ * Most RFC 8701 slots are drawn independently (2026-11-15 fingerprint
+ * diagnosis, D7): the golden chrome-131 capture shows cipher 0x5a5a, leading
+ * ext 0x4a4a, supported_versions 0x4a4a, trailing ext 0x5a5a — equalities
+ * between those slots are per-capture coincidence, not structure. The two
+ * GROUP slots are the exception: `supportedGroups` is NOT drawn at all but
+ * structurally reuses `keyShareGroup` (golden: key_share + supported_groups
+ * 0xcaca — ONE grease-group value, not two). See `drawGreaseSentinels` for the
+ * invariant this preserves.
  */
 interface GreaseSentinels {
     /** GREASE cipher suite at the head of the offered list. */
@@ -97,7 +102,10 @@ interface GreaseSentinels {
     readonly leadingExtension: number;
     /** GREASE group heading the key_share client_shares list. */
     readonly keyShareGroup: number;
-    /** GREASE group heading the supported_groups list. */
+    /**
+     * GREASE group heading the supported_groups list. ALWAYS equal to
+     * `keyShareGroup` — derived, never independently drawn.
+     */
     readonly supportedGroups: number;
     /** GREASE version heading the supported_versions list. */
     readonly supportedVersions: number;
@@ -106,20 +114,38 @@ interface GreaseSentinels {
 }
 
 /**
- * Draw one independent sentinel per GREASE slot, in this order (the sequence is
- * a stable contract — tests pin it with a fake `random` to assert the exact
- * per-slot values that reach the wire).
+ * Draw one sentinel per GREASE slot, in this order (the sequence is a stable
+ * contract — tests pin it with a fake `random` to assert the exact per-slot
+ * values that reach the wire):
+ *
+ *   1. cipherSuite        2. leadingExtension      3. keyShareGroup
+ *   4. supportedVersions  5. trailingExtension (redrawn while === leading)
+ *
+ * `supportedGroups` is DERIVED, not drawn: it reuses `keyShareGroup`. Real
+ * Chrome/BoringSSL structurally shares ONE grease-group value across the
+ * key_share and supported_groups slots (golden chrome-131: 0xcaca in BOTH).
+ * Beyond fingerprint fidelity this preserves the wire invariant
+ * key_share ⊆ supported_groups — RFC 8446 §4.2.8 requires every group offered
+ * in key_share to appear in supported_groups. Drawing the two slots
+ * independently yields a ClientHello whose GREASE key_share group is absent
+ * from supported_groups; strict servers reject that with
+ * `illegal_parameter (47)` (2026-11-15 incident: books.toscrape.com via Zyte
+ * prod-01.gcp.infra.zyte.group — a 2-byte patch equating the two sentinels
+ * flips the server from the alert to a ServerHello). A GREASE group is not a
+ * real group, but servers that validate the inclusion over the raw wire list
+ * cannot tell, so the shared sentinel is the only Chrome-compatible shape.
  *
  * `trailingExtension` is redrawn until it differs from `leadingExtension`:
  * RFC 8446 §4.2 forbids duplicate extension types, so the two GREASE extension
  * SLOTS must never carry the same value. All other slots live in different
- * namespaces (cipher list, group lists, version list) and may repeat freely.
+ * namespaces (cipher list, version list) and may repeat freely.
  */
 function drawGreaseSentinels(random: () => number): GreaseSentinels {
     const cipherSuite = generateGreaseValue(random);
     const leadingExtension = generateGreaseValue(random);
     const keyShareGroup = generateGreaseValue(random);
-    const supportedGroups = generateGreaseValue(random);
+    // NOT drawn — one grease-group value serves both group slots (see above).
+    const supportedGroups = keyShareGroup;
     const supportedVersions = generateGreaseValue(random);
     let trailingExtension = generateGreaseValue(random);
     for (let i = 0; i < 16 && trailingExtension === leadingExtension; i++) {
@@ -162,12 +188,13 @@ export function cipherSuiteToWire(suite: CipherSuite): number {
  * The (EC)DHE public keys come from `keyPairs` (already generated by the caller
  * via @browsercore/crypto).
  *
- * When `config.grease` is enabled, an INDEPENDENT random 0x?a?a sentinel is
- * drawn per slot (from `random`) — cipher list head, leading extension,
- * key-share group, supported_groups head, supported_versions head, trailing
- * extension — matching real Chrome, which draws each slot independently
- * (RFC 8701; golden chrome-131: cipher 0x5a5a, ext 0x4a4a, keyshare/groups
- * 0xcaca). The `random` source and `provider` are required (no singleton
+ * When `config.grease` is enabled, a random 0x?a?a sentinel is drawn per slot
+ * (from `random`) — cipher list head, leading extension, key-share group,
+ * supported_versions head, trailing extension — matching real Chrome (RFC 8701;
+ * golden chrome-131: cipher 0x5a5a, ext 0x4a4a, keyshare/groups 0xcaca). The
+ * supported_groups head is NOT drawn: it structurally reuses the key-share
+ * group sentinel (key_share ⊆ supported_groups — see `drawGreaseSentinels`).
+ * The `random` source and `provider` are required (no singleton
  * fallback) so callers control all randomness; tests pin `random` for
  * deterministic sentinels.
  */
