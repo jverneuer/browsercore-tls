@@ -9,11 +9,17 @@
  *   8. Every ClientHello contains a GREASE key share — a 0x?a?a key-share group
  *      entry prepended to the key_share extension.
  *
+ * Each GREASE slot carries an INDEPENDENTLY drawn sentinel (real Chrome draws
+ * per slot; golden chrome-131 shows cipher 0x5a5a, leading ext 0x4a4a,
+ * key_share/supported_groups 0xcaca in one ClientHello). See
+ * clienthello-byte-fidelity.test.ts for the per-slot independence assertions.
+ *
  * When grease = false (Firefox), none of these appear.
  *
- * The canonical GREASE sentinel this implementation emits is 0x0a0a (the first
- * RFC 8701 value); tests assert both the exact sentinel and the structural
- * 0x?a?a pattern so the intent is pinned even if the sentinel choice changes.
+ * The canonical GREASE sentinel a constant `random()=0.0` source produces is
+ * 0x0a0a (the first RFC 8701 value); tests assert both the exact sentinel and
+ * the structural 0x?a?a pattern so the intent is pinned even if the sentinel
+ * choice changes.
  */
 
 import { describe, it, expect } from "vitest";
@@ -191,13 +197,16 @@ describe("Every ClientHello (grease=true) contains a GREASE key share", () => {
         const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0, crypto);
         const extensions = parseExtensions(hello);
         const ks = extensions.find((e) => e.type === ExtensionType.KEY_SHARE)!;
-        // GREASE group at offset 2, real group right after (GREASE key is 32 bytes).
+        // GREASE group at offset 2. Its key_length is 1 — real Chrome sends a
+        // single 0x00 byte (golden chrome-131 key_share: `caca 0001 00`), not a
+        // 32-byte blob.
         const greaseGroup = ((ks.data[2] ?? 0) << 8) | (ks.data[3] ?? 0);
         const greaseKeyLen = ((ks.data[4] ?? 0) << 8) | (ks.data[5] ?? 0);
         expect(greaseGroup).toBe(CANONICAL_GREASE);
-        expect(greaseKeyLen).toBe(32);
-        // First real group follows the GREASE entry (2+2+32 bytes later).
-        const firstRealGroup = ((ks.data[2 + 2 + 2 + 32] ?? 0) << 8) | (ks.data[2 + 2 + 2 + 32 + 1] ?? 0);
+        expect(greaseKeyLen).toBe(1);
+        expect(ks.data[6]).toBe(0x00); // the single zero payload byte
+        // First real group follows the GREASE entry (2+2+1 bytes later).
+        const firstRealGroup = ((ks.data[2 + 2 + 2 + 1] ?? 0) << 8) | (ks.data[2 + 2 + 2 + 1 + 1] ?? 0);
         expect(firstRealGroup).toBe(0x001d); // x25519
     });
 });
@@ -236,8 +245,10 @@ describe("No GREASE is generated when grease=false (Firefox-style)", () => {
 
 // ---------------------------------------------------------------------------
 // Trailing GREASE extension (RFC 8701) — Chrome parity.
-// Real browsers terminate the extension list with a GREASE value that reuses
-// the same per-connection sentinel as the leading GREASE.
+// Real browsers terminate the extension list with a GREASE value drawn
+// independently from the leading GREASE (equal values would violate RFC 8446
+// §4.2's no-duplicate-extension-types rule). Its body is a single 0x00 byte —
+// golden chrome-131 terminates with `5a5a 0001 00`.
 // ---------------------------------------------------------------------------
 
 describe("Trailing GREASE extension (grease=true)", () => {
@@ -251,16 +262,20 @@ describe("Trailing GREASE extension (grease=true)", () => {
         expect(last!.type).not.toBe(extensions[0]!.type);
     });
 
-    it("the trailing GREASE extension body is empty", async () => {
+    it("the trailing GREASE extension body is a single 0x00 byte", async () => {
         const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => Math.random(), crypto);
         const extensions = parseExtensions(hello);
         const last = extensions[extensions.length - 1]!;
-        expect(last.data.length).toBe(0);
+        // Real Chrome sends one zero byte here, not an empty body: golden
+        // chrome-131 ends `... 2f312e31 | 5a5a 0001 00`.
+        expect(last.data.length).toBe(1);
+        expect(last.data[0]).toBe(0x00);
     });
 
     it("uses a DIFFERENT sentinel for trailing GREASE (avoids duplicate extension types)", async () => {
-        // RFC 8446 §4.2 forbids duplicate extension types. Chrome uses a
-        // different GREASE value for the trailing extension to avoid this.
+        // RFC 8446 §4.2 forbids duplicate extension types. Chrome draws the
+        // trailing GREASE independently; the draw is retried (and ultimately
+        // stepped to the next sentinel) so it can never equal the leading one.
         const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.5, crypto);
         const extensions = parseExtensions(hello);
         const leading = extensions[0]!.type;
@@ -297,8 +312,10 @@ describe("supported_versions advertises GREASE + TLS 1.2 (grease=true)", () => {
         expect(Array.from(sv!.data)).toEqual([0x06, 0x0a, 0x0a, 0x03, 0x04, 0x03, 0x03]);
     });
 
-    it("the leading GREASE version reuses the per-connection sentinel", async () => {
-        // random()=0.5 -> MID_GREASE (0x8a8a).
+    it("the leading GREASE version uses the supported_versions slot's own sentinel", async () => {
+        // random()=0.5 constant -> every slot draws 0x8a8a. The value comes
+        // from this slot's own independent draw (see
+        // clienthello-byte-fidelity.test.ts for the independence assertion).
         const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.5, crypto);
         const extensions = parseExtensions(hello);
         const sv = extensions.find((e) => e.type === ExtensionType.SUPPORTED_VERSIONS)!;
@@ -335,17 +352,17 @@ describe("supported_versions advertises TLS 1.2 even when grease=false", () => {
 // ---------------------------------------------------------------------------
 
 describe("Trailing GREASE fallback when random returns same value", () => {
-    it("uses fallback when all random bytes produce the same GREASE value", async () => {
-        // Provider that always returns 0x00 bytes, mapping to GREASE index 0 (0x0a0a).
-        // This forces the fallback path since all 16 retries produce the same value.
-        const stuckProvider = {
-            ...crypto,
-            randomBytes: (n: number) => new Uint8Array(n), // all zeros
-        };
-        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0, stuckProvider);
+    it("steps to the next sentinel when every draw repeats the leading value", async () => {
+        // A constant random()=0.0 makes every slot draw 0x0a0a, so the trailing
+        // draw retries exhaust and the deterministic fallback fires: step to
+        // the next GREASE value (0x1a1a) so the two extension slots never
+        // collide (RFC 8446 §4.2).
+        const hello = buildClientHello(greasedConfig(), await x25519KeyPair(), () => 0.0, crypto);
         const extensions = parseExtensions(hello);
         const leading = extensions[0]!.type;
         const trailing = extensions[extensions.length - 1]!.type;
+        expect(leading).toBe(0x0a0a);
+        expect(trailing).toBe(0x1a1a);
         expect(isGreasePattern(trailing)).toBe(true);
         expect(trailing).not.toBe(leading);
     });

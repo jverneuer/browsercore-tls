@@ -159,9 +159,20 @@ export async function readEncryptedRecord(
     return { innerType, content: plaintext.subarray(0, end - 1), readBuffer: record.readBuffer };
 }
 
-/** Write an unencrypted record (used for the initial ClientHello/ServerHello). */
-export async function writeRecord(transport: Transport, type: ContentType, fragment: Uint8Array): Promise<void> {
-    await transport.write(concat(serializeRecordHeader(type, fragment.length), fragment));
+/**
+ * Write an unencrypted record (used for the initial ClientHello/ServerHello).
+ *
+ * `version` overrides the legacy record version (default 0x0303). The only
+ * caller that needs it is the initial ClientHello, which carries 0x0301 like
+ * real Chrome (RFC 8446 §5.1) — see {@link CLIENT_HELLO_RECORD_VERSION}.
+ */
+export async function writeRecord(
+    transport: Transport,
+    type: ContentType,
+    fragment: Uint8Array,
+    version = 0x0303,
+): Promise<void> {
+    await transport.write(concat(serializeRecordHeader(type, fragment.length, version), fragment));
 }
 
 /**

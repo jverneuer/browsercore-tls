@@ -16,7 +16,7 @@
 import type { Transport } from "@browsercore/transport";
 import type { CryptoProvider, HashId } from "@browsercore/crypto";
 import { TlsHandshakeError, type AlertLevel, type HandshakePhase as TimeoutPhase } from "../errors.js";
-import { ContentType, cipherSuiteToAead } from "../record/record.js";
+import { CLIENT_HELLO_RECORD_VERSION, ContentType, cipherSuiteToAead } from "../record/record.js";
 import {
     advanceHandshake,
     buildClientHello,
@@ -188,7 +188,11 @@ export async function runHandshake(
     };
     const clientHello = buildClientHello(profile, keyPairs, greaseRandom, ctx.crypto);
     ctx.transcript.push(clientHello);
-    await writeRecord(ctx.transport, ContentType.HANDSHAKE, clientHello);
+    // The INITIAL ClientHello record carries legacy version 0x0301 — real
+    // Chrome bytes `16 03 01` (golden chrome-131). Every subsequent record
+    // (including ClientHello_2 after an HRR) stays at the 0x0303 default per
+    // RFC 8446 §5.1.
+    await writeRecord(ctx.transport, ContentType.HANDSHAKE, clientHello, CLIENT_HELLO_RECORD_VERSION);
     ctx.onDebug?.(`phase: client_hello — ClientHello sent (${clientHello.length} bytes)`);
 
     // 3. Read the ServerHello (still plaintext) and validate the negotiation.
