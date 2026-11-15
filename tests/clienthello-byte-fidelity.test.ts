@@ -6,10 +6,13 @@
  *   D6b — supported_groups advertises a list INDEPENDENT of the key-share list
  *         when `supportedGroups` is configured; absent it, it derives from
  *         `keyShareGroups` (backwards compatible).
- *   D7  — every GREASE slot (cipher head, leading ext, key_share group,
- *         supported_groups head, supported_versions head, trailing ext) carries
- *         an INDEPENDENTLY drawn 0x?a?a sentinel, and the trailing GREASE
- *         extension body is one 0x00 byte (was empty).
+ *   D7  — the GREASE slots (cipher head, leading ext, supported_versions head,
+ *         trailing ext) each carry an INDEPENDENTLY drawn 0x?a?a sentinel; the
+ *         two group slots are coupled — supported_groups reuses the key_share
+ *         group's sentinel (golden chrome-131: 0xcaca in BOTH; key_share ⊆
+ *         supported_groups, else strict servers send illegal_parameter (47),
+ *         2026-11-15 incident). The trailing GREASE extension body is one 0x00
+ *         byte (was empty).
  *   D8  — the INITIAL ClientHello record carries legacy version 0x0301; the
  *         ClientHello_2 record after an HRR stays 0x0303 (RFC 8446 §5.1).
  *   D9  — ALPS advertises ONLY "h2" (5-byte body `00 03 02 68 32`), and is
@@ -101,10 +104,12 @@ function fakeKeyPairs(groups: readonly KeyPair["algorithm"][]): readonly KeyPair
 
 /**
  * Deterministic sequenced random source. drawGreaseSentinels consumes draws in
- * a fixed slot order (cipher, leading ext, key_share group, supported_groups,
- * supported_versions, trailing ext), so feeding i/16 puts sentinel i in slot i:
- * 0x0a0a, 0x1a1a, 0x2a2a, 0x3a3a, 0x4a4a, 0x5a5a — all distinct, mirroring the
- * golden capture's per-slot independence (5a5a/4a4a/caca).
+ * a fixed slot order (cipher, leading ext, key_share group, supported_versions,
+ * trailing ext — supported_groups does NOT draw, it derives from the
+ * key_share group), so feeding i/16 puts sentinel i in draw-slot i:
+ * 0x0a0a, 0x1a1a, 0x2a2a, 0x3a3a, 0x4a4a — all distinct, mirroring the golden
+ * capture's per-slot independence (5a5a/4a4a) with ONE shared group sentinel
+ * (caca in both group slots).
  */
 function sequencedRandom(drawCount: number): () => number {
     let draws = 0;
@@ -132,12 +137,12 @@ describe("D6: key_share GREASE entry is 1 byte of 0x00", () => {
     });
 });
 
-describe("D7: every GREASE slot draws an independent sentinel", () => {
-    it("uses a distinct sentinel per slot (cipher, exts, groups, versions)", async () => {
+describe("D7: GREASE sentinels — independent per slot except the coupled group slots", () => {
+    it("supported_groups shares the key_share sentinel; other slots stay distinct", async () => {
         const hello = buildClientHello(
             greasedConfig(),
             fakeKeyPairs(["x25519"]),
-            sequencedRandom(6),
+            sequencedRandom(5),
             crypto,
         );
 
@@ -156,32 +161,40 @@ describe("D7: every GREASE slot draws an independent sentinel", () => {
             trailingExtension: extensions[extensions.length - 1]!.type,
         };
 
-        // One distinct draw per slot, in the documented draw order — the real
-        // Chrome structure (golden: cipher 0x5a5a, ext 0x4a4a, keyshare/groups
-        // 0xcaca — equalities between slots are coincidence, never structure).
+        // One draw per independent slot, in the documented draw order — the
+        // real Chrome structure (golden: cipher 0x5a5a, ext 0x4a4a,
+        // keyshare/groups 0xcaca). The group slots share ONE value: BoringSSL
+        // reuses the grease group for key_share AND supported_groups, and the
+        // wire invariant key_share ⊆ supported_groups demands it.
         expect(slotValues).toEqual({
             cipherSuite: 0x0a0a,
             leadingExtension: 0x1a1a,
             keyShareGroup: 0x2a2a,
-            supportedGroups: 0x3a3a,
-            supportedVersions: 0x4a4a,
-            trailingExtension: 0x5a5a,
+            supportedGroups: 0x2a2a,
+            supportedVersions: 0x3a3a,
+            trailingExtension: 0x4a4a,
         });
-        // Statistical structure: NOT all equal (a single reused sentinel is the
-        // old, fingerprint-divergent behavior).
-        expect(new Set(Object.values(slotValues)).size).toBe(6);
+        // THE coupling: the supported_groups sentinel IS the key_share sentinel.
+        // Independent draws here offered a key_share GREASE group absent from
+        // supported_groups, and strict servers (books.toscrape.com via Zyte,
+        // 2026-11-15) rejected the hello with illegal_parameter (47).
+        expect(slotValues.supportedGroups).toBe(slotValues.keyShareGroup);
+        // The five independent values remain pairwise distinct — no sentinel
+        // collapse (one reused value across every slot is the old,
+        // fingerprint-divergent behavior).
+        expect(new Set(Object.values(slotValues)).size).toBe(5);
     });
 
     it("the trailing GREASE extension body is a single 0x00 byte", async () => {
-        const hello = buildClientHello(greasedConfig(), fakeKeyPairs(["x25519"]), sequencedRandom(6), crypto);
+        const hello = buildClientHello(greasedConfig(), fakeKeyPairs(["x25519"]), sequencedRandom(5), crypto);
         const trailing = parseExtensions(hello).at(-1)!;
-        expect(trailing.type).toBe(0x5a5a);
+        expect(trailing.type).toBe(0x4a4a);
         // Golden chrome-131 tail: `5a5a 0001 00` — 1-byte body, not empty.
         expect(Array.from(trailing.data)).toEqual([0x00]);
     });
 
     it("the leading GREASE extension body stays empty", async () => {
-        const hello = buildClientHello(greasedConfig(), fakeKeyPairs(["x25519"]), sequencedRandom(6), crypto);
+        const hello = buildClientHello(greasedConfig(), fakeKeyPairs(["x25519"]), sequencedRandom(5), crypto);
         const leading = parseExtensions(hello)[0]!;
         expect(leading.type).toBe(0x1a1a);
         // Golden chrome-131: `4a4a 0000` — the LEADING GREASE ext has no body.
@@ -243,16 +256,24 @@ describe("D6b: supported_groups advertises independently of key_share", () => {
         expect(Array.from(sg.data)).toEqual([0x00, 0x04, 0x11, 0xec, 0x00, 0x1d]);
     });
 
-    it("injects the supported_groups slot's own GREASE sentinel when grease=true", () => {
+    it("reuses the key_share group's GREASE sentinel in supported_groups when grease=true", () => {
         const cfg: ClientHelloConfig = { ...splitConfig(ADVERTISED), grease: true };
-        // Draws: cipher(0x0a0a), leadExt(0x1a1a), ksGroup(0x2a2a), sgGroup(0x3a3a), …
-        const hello = buildClientHello(cfg, fakeKeyPairs(["X25519MLKEM768", "x25519"]), sequencedRandom(6), crypto);
-        const sg = parseExtensions(hello).find((e) => e.type === ExtensionType.SUPPORTED_GROUPS)!;
+        // Draws: cipher(0x0a0a), leadExt(0x1a1a), ksGroup(0x2a2a), sv(0x3a3a), …
+        // — supported_groups derives from the ksGroup draw, it has no own draw.
+        const hello = buildClientHello(cfg, fakeKeyPairs(["X25519MLKEM768", "x25519"]), sequencedRandom(5), crypto);
+        const extensions = parseExtensions(hello);
+        const ks = extensions.find((e) => e.type === ExtensionType.KEY_SHARE)!;
+        const sg = extensions.find((e) => e.type === ExtensionType.SUPPORTED_GROUPS)!;
+        // THE invariant: the GREASE group heading supported_groups is the SAME
+        // value heading key_share (golden chrome-131: 0xcaca in both) — a
+        // key_share GREASE group absent from supported_groups draws
+        // illegal_parameter (47) from strict servers (2026-11-15).
         expect(Array.from(sg.data)).toEqual([
             0x00, 0x0a, // list_len = 5 groups * 2
-            0x3a, 0x3a, // this slot's OWN sentinel, not the key_share one
+            0x2a, 0x2a, // the key_share slot's sentinel, shared — not an own draw
             0x11, 0xec, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x18,
         ]);
+        expect(((ks.data[2] ?? 0) << 8) | (ks.data[3] ?? 0)).toBe(0x2a2a);
     });
 });
 

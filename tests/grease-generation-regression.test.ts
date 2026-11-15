@@ -9,9 +9,10 @@
  *   8. Every ClientHello contains a GREASE key share — a 0x?a?a key-share group
  *      entry prepended to the key_share extension.
  *
- * Each GREASE slot carries an INDEPENDENTLY drawn sentinel (real Chrome draws
- * per slot; golden chrome-131 shows cipher 0x5a5a, leading ext 0x4a4a,
- * key_share/supported_groups 0xcaca in one ClientHello). See
+ * Each GREASE slot except the group pair carries an INDEPENDENTLY drawn
+ * sentinel (real Chrome draws per slot; golden chrome-131 shows cipher 0x5a5a,
+ * leading ext 0x4a4a, key_share/supported_groups 0xcaca in one ClientHello —
+ * the two group slots structurally share ONE value). See
  * clienthello-byte-fidelity.test.ts for the per-slot independence assertions.
  *
  * When grease = false (Firefox), none of these appear.
