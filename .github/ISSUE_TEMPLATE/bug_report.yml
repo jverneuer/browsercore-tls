@@ -1,0 +1,49 @@
+name: Bug report
+description: Something behaves differently from the browser it should impersonate — or plainly breaks.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you saw vs. what you expected. "Real Chrome does X, BrowserCore does Y" is the perfect report.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does it happen?
+      multiple: true
+      options:
+        - TLS handshake / fingerprint
+        - HTTP/1.1
+        - HTTP/2
+        - HTTP/3 / QUIC
+        - fetch / redirects / cookies
+        - proxy support
+        - build / tooling / types
+        - not sure
+    validations:
+      required: true
+  - type: input
+    id: profile
+    attributes:
+      label: Browser profile (if relevant)
+      description: e.g. "chrome-131" — or "not profile-related".
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: >
+        Minimal code or steps — even "curl works, BrowserCore doesn't" with details helps a lot.
+        A real browser capture for comparison is gold.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output / logs
+      render: shell
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Node version, OS, package version (`npm ls @browsercore/<pkg>`).

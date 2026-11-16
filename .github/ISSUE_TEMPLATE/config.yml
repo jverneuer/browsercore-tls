@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions & discussion
+    url: https://github.com/jverneuer/browsersmith/discussions
+    about: Ask anything before filing an issue — no wrong questions.
+  - name: Contribution guide
+    url: https://github.com/jverneuer/browsersmith/blob/main/CONTRIBUTING.md
+    about: How to report bugs well and open pull requests.
+  - name: Security issue?
+    url: https://github.com/jverneuer/browsersmith/blob/main/SECURITY.md
+    about: Please report vulnerabilities privately, never in a public issue.

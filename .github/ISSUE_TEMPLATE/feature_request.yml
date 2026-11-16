@@ -1,0 +1,27 @@
+name: Feature or idea
+description: Suggest a capability, a browser profile, a better API, or an improvement.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to achieve, and what's blocking you today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What you'd like to happen. Optional, but speeds things up.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Willing to help?
+      description: Contributing is easier than you think — see the contribution guide linked in the sidebar.
+      options:
+        - label: I'd like to work on this (guidance provided)
