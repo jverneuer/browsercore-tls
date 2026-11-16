@@ -1,0 +1,16 @@
+name: Question
+description: Ask how something works, how to use it, or whether BrowserCore fits your case.
+labels: ["question"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: The more concrete, the faster the answer.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: What are you trying to do?
+      description: Optional — helps us answer in terms of your actual use case.
