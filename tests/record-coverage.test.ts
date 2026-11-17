@@ -19,7 +19,7 @@ import {
     serializeRecordHeader,
 } from "../src/record/record.js";
 import { NotImplementedError, TlsDecryptError } from "../src/errors.js";
-import type { AeadAlgorithm, CipherSuite } from "../src/types.js";
+import type { CipherSuite } from "../src/types.js";
 
 describe("cipherSuiteToAead — TLS 1.2 suites throw NotImplementedError", () => {
     it("throws for TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256", () => {

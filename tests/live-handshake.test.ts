@@ -24,7 +24,7 @@ import { connectTls } from "../src/tls.js";
 import { TLS_1_3 } from "../src/types.js";
 import type { ClientHelloConfig } from "../src/types.js";
 
-const RUN_LIVE_TESTS = process.env.RUN_LIVE_TESTS === "1";
+const RUN_LIVE_TESTS = process.env["RUN_LIVE_TESTS"] === "1";
 
 /** Real Node.js Net adapter backed by node:net for live TCP connections. */
 const nodeNet: Net = {

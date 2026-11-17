@@ -26,6 +26,14 @@ import {
     createVerify,
     constants,
 } from "node:crypto";
+import type {
+    CipherCCM,
+    CipherChaCha20Poly1305,
+    CipherGCM,
+    DecipherCCM,
+    DecipherChaCha20Poly1305,
+    DecipherGCM,
+} from "node:crypto";
 
 import {
     NobleX25519Backend,
@@ -109,24 +117,48 @@ function hashAlgorithmName(hash: HashId): string {
     }
 }
 
+/** node:crypto cipher classes with the AEAD tag surface (setAAD/getAuthTag). */
+type AeadCipher = CipherGCM | CipherCCM | CipherChaCha20Poly1305;
+/** node:crypto decipher classes with the AEAD tag surface (setAAD/setAuthTag). */
+type AeadDecipher = DecipherGCM | DecipherCCM | DecipherChaCha20Poly1305;
+
 /**
- * Look up the `node:crypto` algorithm string and per-cipher options for a
- * branded AEAD cipher identifier. AES-CCM requires an explicit
- * `authTagLength`; GCM and ChaCha20-Poly1305 use node's default.
+ * Construct the node:crypto AEAD cipher for a branded cipher id.
+ *
+ * Each branch passes a LITERAL algorithm string so the compiler resolves the
+ * typed createCipheriv overload (CipherGCM / CipherCCM / CipherChaCha20Poly1305
+ * — the classes carrying setAAD/getAuthTag) rather than the stringly-typed
+ * fallback that returns the bare `Cipheriv` base. A previously shared
+ * `{ algorithm: string }` config table defeated exactly that resolution.
+ * AES-CCM requires an explicit authTagLength; GCM and ChaCha20-Poly1305
+ * default to 16 bytes.
  */
-function aeadCipherConfig(cipher: TestAeadCipher): {
-    algorithm: string;
-    authTagLength: number | undefined;
-} {
+function makeAeadCipher(cipher: TestAeadCipher, key: Uint8Array, nonce: Uint8Array): AeadCipher {
     switch (cipher) {
         case "AES-128-GCM":
-            return { algorithm: "aes-128-gcm", authTagLength: undefined };
+            return createCipheriv("aes-128-gcm", key, nonce);
         case "AES-256-GCM":
-            return { algorithm: "aes-256-gcm", authTagLength: undefined };
+            return createCipheriv("aes-256-gcm", key, nonce);
         case "AES-128-CCM":
-            return { algorithm: "aes-128-ccm", authTagLength: AEAD_TAG_LENGTH };
+            return createCipheriv("aes-128-ccm", key, nonce, { authTagLength: AEAD_TAG_LENGTH });
         case "ChaCha20-Poly1305":
-            return { algorithm: "chacha20-poly1305", authTagLength: undefined };
+            return createCipheriv("chacha20-poly1305", key, nonce);
+        default:
+            return assertNever(cipher);
+    }
+}
+
+/** Decipher counterpart of {@link makeAeadCipher}. */
+function makeAeadDecipher(cipher: TestAeadCipher, key: Uint8Array, nonce: Uint8Array): AeadDecipher {
+    switch (cipher) {
+        case "AES-128-GCM":
+            return createDecipheriv("aes-128-gcm", key, nonce);
+        case "AES-256-GCM":
+            return createDecipheriv("aes-256-gcm", key, nonce);
+        case "AES-128-CCM":
+            return createDecipheriv("aes-128-ccm", key, nonce, { authTagLength: AEAD_TAG_LENGTH });
+        case "ChaCha20-Poly1305":
+            return createDecipheriv("chacha20-poly1305", key, nonce);
         default:
             return assertNever(cipher);
     }
@@ -143,11 +175,7 @@ function aeadEncrypt(
     plaintext: Uint8Array,
     aad: Uint8Array,
 ): Uint8Array {
-    const { algorithm, authTagLength } = aeadCipherConfig(cipher);
-    const enc =
-        authTagLength === undefined
-            ? createCipheriv(algorithm, key, nonce)
-            : createCipheriv(algorithm, key, nonce, { authTagLength });
+    const enc = makeAeadCipher(cipher, key, nonce);
     enc.setAAD(aad, { plaintextLength: plaintext.length });
     const out = new Uint8Array(enc.update(plaintext));
     const final = new Uint8Array(enc.final());
@@ -173,14 +201,10 @@ function aeadDecrypt(
     if (ciphertextAndTag.length < AEAD_TAG_LENGTH) {
         throw new DecryptError(cipher);
     }
-    const { algorithm, authTagLength } = aeadCipherConfig(cipher);
     const tagStart = ciphertextAndTag.length - AEAD_TAG_LENGTH;
     const ciphertext = ciphertextAndTag.subarray(0, tagStart);
     const tag = ciphertextAndTag.subarray(tagStart);
-    const dec =
-        authTagLength === undefined
-            ? createDecipheriv(algorithm, key, nonce)
-            : createDecipheriv(algorithm, key, nonce, { authTagLength });
+    const dec = makeAeadDecipher(cipher, key, nonce);
     dec.setAuthTag(tag);
     dec.setAAD(aad, { plaintextLength: ciphertext.length });
     try {
@@ -237,7 +261,9 @@ export function createTestCryptoProvider(
             // node:crypto.hkdfSync(digest, ikm, salt, info, keylen)
             const digest = hashAlgorithmName(hash);
             const key = hkdfSync(digest, ikm, salt, info, length);
-            return new Uint8Array(key.buffer, key.byteOffset, key.byteLength);
+            // hkdfSync returns a fresh ArrayBuffer (@types/node 26) — wrap it
+            // in a view; no shared-buffer offset arithmetic needed.
+            return new Uint8Array(key);
         },
         hmac(hash: HashId, key: Uint8Array, data: Uint8Array): Uint8Array {
             const algorithm = hashAlgorithmName(hash);

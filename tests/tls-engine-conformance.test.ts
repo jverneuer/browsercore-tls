@@ -17,15 +17,14 @@
  *    (0.4.17) implements the FULL canonical Clock — not just the now/sleep
  *    subset tls calls today.
  *
- * Compile proof (tests/ is outside `npm run typecheck`'s tsconfig scope by
- * polyrepo convention — same as contracts' own conformance tests):
- *   npx tsc --ignoreConfig --noEmit --strict --target ES2024 --lib ES2024 \
- *     --module NodeNext --moduleResolution NodeNext --moduleDetection force \
- *     --exactOptionalPropertyTypes --noUncheckedIndexedAccess \
- *     --noPropertyAccessFromIndexSignature --noImplicitOverride \
- *     --noImplicitReturns --noFallthroughCasesInSwitch --noUnusedLocals \
- *     --noUnusedParameters --useUnknownInCatchVariables --skipLibCheck \
- *     --types node tests/tls-engine-conformance.test.ts
+ * Compile proof: this file is typechecked by `npm run typecheck` via
+ * tsconfig.test.json (the dual src+tests gate — tests used to sit outside the
+ * gate, which left this proof unvalidated; see that config's header). Both
+ * directions are enforced on every CI run:
+ *   - the positive wiring below must compile against the contract;
+ *   - the @ts-expect-error negative control must suppress a REAL error — if
+ *     the constraint ever loosens, tsc flags the unused directive (TS2578)
+ *     and the gate fails instead of silently going vacuous.
  */
 
 import { describe, expect, it } from "vitest";

@@ -513,7 +513,8 @@ describe("validateHostname edge cases", () => {
         return {
             tbsBytes: new Uint8Array(0),
             subjectAltNames: sans,
-            commonName,
+            // Key omitted (not `undefined`) when absent — exactOptionalPropertyTypes.
+            ...(commonName !== undefined ? { commonName } : {}),
             notBefore: 0,
             notAfter: Number.MAX_SAFE_INTEGER,
             keyUsageDigitalSignature: true,

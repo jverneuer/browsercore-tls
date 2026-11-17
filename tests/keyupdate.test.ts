@@ -13,15 +13,14 @@
 
 import { describe, it, expect } from "vitest";
 import { connectTls } from "../src/tls.js";
-import { TlsError, TlsHandshakeError, AlertDescription } from "../src/errors.js";
-import { ContentType, serializeRecordHeader, encryptRecord } from "../src/record/record.js";
+import { TlsHandshakeError, AlertDescription } from "../src/errors.js";
+import { ContentType } from "../src/record/record.js";
 import { TLS_1_3 } from "../src/types.js";
 import type { ApplicationTrafficSecrets, ClientHelloConfig } from "../src/types.js";
 import { FakeTransport } from "./fake-transport.js";
 import { TlsServerSim } from "./server-sim.js";
 import { createMockEventProvider, createTestCryptoProvider } from "./test-helpers.js";
-import { xorNonce, writeEncryptedRecord, concat } from "../src/connection/record-layer.js";
-import { updateTrafficSecrets } from "../src/crypto/keySchedule.js";
+import { writeEncryptedRecord } from "../src/connection/record-layer.js";
 import { HandshakeType } from "../src/handshake/handshake.js";
 
 const crypto = createTestCryptoProvider();

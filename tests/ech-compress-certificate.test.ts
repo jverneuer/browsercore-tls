@@ -57,7 +57,7 @@ const config: ClientHelloConfig = {
 async function build(): Promise<Map<number, Uint8Array>> {
     const pairs = await generateKeyShares(["x25519"], crypto);
     const hello = buildClientHello(config, pairs, () => 0.0, crypto);
-    return parseExtensions(hello.bytes ?? hello);
+    return parseExtensions(hello);
 }
 
 describe("ECH GREASE (ext 65037)", () => {

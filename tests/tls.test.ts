@@ -33,7 +33,8 @@ import {
     parseServerHello,
     recordServerHello,
 } from "../src/handshake/handshake.js";
-import type { ClientHelloConfig, ServerHelloValidation } from "../src/handshake/handshake.js";
+import type { ServerHelloValidation } from "../src/handshake/handshake.js";
+import type { ClientHelloConfig } from "../src/types.js";
 import { deriveApplicationSecrets, deriveHandshakeTrafficSecrets } from "../src/crypto/keySchedule.js";
 import { TLS_1_3 } from "../src/types.js";
 import type { CipherSuite, KeyPair } from "../src/types.js";
@@ -86,7 +87,7 @@ describe("typed errors", () => {
         const err = new TlsError("something failed", { foo: 1 }, { cause });
         expect(err).toBeInstanceOf(Error);
         expect(err.kind).toBe("TlsError");
-        expect(err.details.foo).toBe(1);
+        expect(err.details["foo"]).toBe(1);
         expect(err.cause).toBe(cause);
         expect(err.name).toBe("TlsError");
     });

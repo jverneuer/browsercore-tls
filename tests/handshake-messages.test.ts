@@ -253,10 +253,13 @@ describe("parseCertificateMessage", () => {
         } catch (e) {
             const cause = (e as TlsHandshakeError).cause;
             expect(cause).toBeDefined();
-            expect(cause?.cause).toBeDefined();
+            const innerCause = cause?.cause;
+            expect(innerCause).toBeInstanceOf(Error);
             // The inner cause should be the original parseCertificate error
             // (a TlsHandshakeError about the tag mismatch).
-            expect(cause?.cause?.message).toMatch(/tag/);
+            if (innerCause instanceof Error) {
+                expect(innerCause.message).toMatch(/tag/);
+            }
         }
     });
 });
@@ -405,7 +408,7 @@ describe("verifyCertificateVerify", () => {
         const signature = new Uint8Array(signer.sign({ key: ctx.privateKeyPem, dsaEncoding: "der" }));
 
         // Corrupt the last byte (still valid DER, wrong value → verify returns false).
-        signature[signature.length - 1] ^= 0xff;
+        signature[signature.length - 1]! ^= 0xff;
         const body = buildCertVerifyBody(signature);
 
         expect(() => verifyCertificateVerify(body, ctx.spki, ctx.transcript, "SHA-256", crypto)).toThrow(TlsHandshakeError);

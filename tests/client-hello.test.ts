@@ -22,7 +22,7 @@ import {
 import { ExtensionType } from "../src/extensions/extensions.js";
 import { TlsHandshakeError } from "../src/errors.js";
 import { TLS_1_3 } from "../src/types.js";
-import type { ClientHelloConfig, KeyPair } from "../src/types.js";
+import type { CipherSuite, ClientHelloConfig, KeyPair, NamedGroup, SignatureScheme } from "../src/types.js";
 import { NAMED_GROUP_CODES } from "../src/iana/index.js";
 
 async function keyPairs(groups: readonly string[]): Promise<readonly KeyPair[]> {
@@ -75,7 +75,7 @@ describe("buildClientHello per-index undefined guards", () => {
         // config.cipherSuites is typed as a non-undefined array, but a caller
         // could pass one with a hole; the encoder must not silently emit 0x0000.
         const kps = await keyPairs(["x25519"]);
-        const sparse = ["TLS_AES_128_GCM_SHA256", undefined as unknown as "TLS_AES_128_GCM_SHA256"];
+        const sparse: CipherSuite[] = ["TLS_AES_128_GCM_SHA256", undefined as unknown as CipherSuite];
         const cfg = { ...BASE_CONFIG, cipherSuites: sparse };
         try {
             buildClientHello(cfg, kps, () => Math.random(), crypto);
@@ -102,7 +102,7 @@ describe("buildClientHello per-index undefined guards", () => {
 
     it("throws when a signature algorithm entry is undefined", async () => {
         const kps = await keyPairs(["x25519"]);
-        const sparse = ["ecdsa_secp256r1_sha256", undefined as unknown as "ecdsa_secp256r1_sha256"];
+        const sparse: SignatureScheme[] = ["ecdsa_secp256r1_sha256", undefined as unknown as SignatureScheme];
         const cfg = { ...BASE_CONFIG, signatureAlgorithms: sparse };
         try {
             buildClientHello(cfg, kps, () => Math.random(), crypto);
@@ -115,7 +115,7 @@ describe("buildClientHello per-index undefined guards", () => {
 
     it("throws when a supported group entry is undefined", async () => {
         const kps = await keyPairs(["x25519"]);
-        const sparse = ["x25519", undefined as unknown as "x25519"];
+        const sparse: NamedGroup[] = ["x25519", undefined as unknown as NamedGroup];
         const cfg = { ...BASE_CONFIG, keyShareGroups: sparse };
         try {
             buildClientHello(cfg, kps, () => Math.random(), crypto);
@@ -239,6 +239,9 @@ describe("buildClientHello post-quantum key share groups", () => {
         // We search for the X25519MLKEM768 wire code (0x11ec) in the message.
         const pqWire = NAMED_GROUP_CODES["X25519MLKEM768"];
         const x25519Wire = NAMED_GROUP_CODES["x25519"];
+        if (pqWire === undefined || x25519Wire === undefined) {
+            throw new Error("NAMED_GROUP_CODES is missing the x25519 / X25519MLKEM768 entries");
+        }
         const bytes = Array.from(hello);
         // Find the supported_groups extension (type 10 = 0x000a).
         const sgIdx = bytes.indexOf(0x00, bytes.indexOf(0x0a));

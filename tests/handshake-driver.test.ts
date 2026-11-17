@@ -177,6 +177,7 @@ describe("connectTls full handshake (runHandshake)", () => {
         try {
             await connectTls({
                 transport: new HandshakeTransport(new TlsServerSim()),
+                crypto,
                 serverName: "example.com",
                 profile: { ...PROFILE, keyShareGroups: ["x448"] },
                 events: createMockEventProvider(),
@@ -213,7 +214,7 @@ describe("connectTls full handshake (runHandshake)", () => {
         sim.onClientHello = (rec: Uint8Array) => {
             orig(rec);
             const finished = sim.responses[4]!; // sh + ee + cert + cv + finished
-            finished[finished.length - 1] ^= 0xff;
+            finished[finished.length - 1]! ^= 0xff;
         };
         await expect(
             connectTls({ transport, serverName: "example.com", profile: PROFILE, crypto, events: createMockEventProvider() }),

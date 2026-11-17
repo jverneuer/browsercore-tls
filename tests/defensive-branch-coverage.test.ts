@@ -23,6 +23,7 @@ import { TlsHandshakeError, TlsDecryptError } from "../src/errors.js";
 import { ContentType, serializeRecordHeader, encryptRecord } from "../src/record/record.js";
 import { TLS_1_3 } from "../src/types.js";
 import type { ClientHelloConfig } from "../src/types.js";
+import type { Certificate } from "../src/certificates/certificates.js";
 import { TlsServerSim } from "./server-sim.js";
 import { readRawRecord, xorNonce, AEAD_TAG_LENGTH } from "../src/connection/record-layer.js";
 import * as handshakeMessages from "../src/connection/handshake-messages.js";
@@ -231,7 +232,11 @@ describe("runHandshake — CertificateVerify before Certificate consumed", () =>
         const spy = vi.spyOn(handshakeMessages, "validateCertificateChain");
         spy.mockImplementation(async (...args: Parameters<typeof origValidate>) => {
             const chain = await origValidate(...args);
-            return { ...chain, leaf: undefined } as typeof chain;
+            // Deliberately-invalid value (same sanctioned negative-test pattern
+            // as the bogus CipherSuite in cipher-encoding-regression.test.ts):
+            // the type says leaf is always present; the defensive guard under
+            // test must handle runtime data that violates the type.
+            return { ...chain, leaf: undefined as unknown as Certificate };
         });
 
         const sim = new TlsServerSim();

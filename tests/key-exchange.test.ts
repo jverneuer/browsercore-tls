@@ -17,7 +17,8 @@ import { hkdfExpandLabel, hashLengthFor } from "../src/crypto/keySchedule.js";
 import { TlsHandshakeError } from "../src/errors.js";
 import { ExtensionType, namedGroupToWire } from "../src/extensions/extensions.js";
 import { TLS_1_3 } from "../src/types.js";
-import type { KeyPair, ServerHello } from "../src/handshake/handshake.js";
+import type { ServerHello } from "../src/handshake/handshake.js";
+import type { KeyPair } from "../src/types.js";
 
 /** Concatenate two byte arrays (mirrors generateKeyShares' hybrid layout). */
 function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
@@ -171,7 +172,7 @@ describe("computeSharedSecret", () => {
         const sh = serverHelloWithKeyShare(namedGroupToWire("x25519"), client.publicKey);
         expect(() => computeSharedSecret(sh, [], crypto)).toThrow(TlsHandshakeError);
         try {
-            computeSharedSecret(sh, []);
+            computeSharedSecret(sh, [], crypto);
         } catch (e) {
             expect((e as TlsHandshakeError).cause?.message).toMatch(/we did not offer/);
         }
@@ -310,7 +311,7 @@ describe("verifyServerFinished", () => {
         const transcript = new Uint8Array([10, 20, 30]);
         const body = makeFinished("SHA-256", transcript, secret);
         // Flip a byte so the HMAC no longer matches.
-        body[0] ^= 0xff;
+        body[0]! ^= 0xff;
         expect(() => verifyServerFinished(body, transcript, "SHA-256", secret, crypto)).toThrow(TlsHandshakeError);
         try {
             verifyServerFinished(body, transcript, "SHA-256", secret, crypto);
@@ -332,7 +333,7 @@ describe("computeSharedSecret — X25519MLKEM768 guards", () => {
     it("rejects a malformed hybrid server share length", async () => {
         const classical = crypto.x25519GenerateKeyPair();
         const pq = crypto.mlkem768GenerateKeyPair();
-        const keyPairs = [
+        const keyPairs: KeyPair[] = [
             {
                 algorithm: "X25519MLKEM768",
                 privateKey: concatBytes(pq.secretKey, classical.secretKey),
@@ -345,7 +346,7 @@ describe("computeSharedSecret — X25519MLKEM768 guards", () => {
 
     it("rejects a hybrid pair whose private key has the wrong length", async () => {
         const classical = crypto.x25519GenerateKeyPair();
-        const keyPairs = [
+        const keyPairs: KeyPair[] = [
             { algorithm: "X25519MLKEM768", privateKey: new Uint8Array(10), publicKey: new Uint8Array(1216) },
         ];
         const sh = serverHelloWithKeyShare(0x11ec, new Uint8Array(32 + 1088));
