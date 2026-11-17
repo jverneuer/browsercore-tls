@@ -5,7 +5,8 @@
  * cross-package imports.
  */
 
-import { systemClock, type Clock } from "./types.js";
+import type { Clock } from "@browsercore/contracts";
+import { systemClock } from "./types.js";
 
 /**
  * Exhaustiveness check for `switch`/`if-else` over discriminated unions.
