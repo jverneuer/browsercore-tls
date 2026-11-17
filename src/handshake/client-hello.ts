@@ -8,7 +8,7 @@
  * handshake module only consumes the bytes it produces.
  */
 
-import type { CryptoProvider } from "@browsercore/crypto";
+import type { CryptoProvider } from "@browsercore/contracts";
 import type {
     CipherSuite,
     ClientHelloConfig,

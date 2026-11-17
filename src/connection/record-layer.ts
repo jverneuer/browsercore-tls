@@ -14,7 +14,7 @@
  */
 
 import type { Transport } from "@browsercore/transport";
-import type { CryptoProvider } from "@browsercore/crypto";
+import type { CryptoProvider } from "@browsercore/contracts";
 import type { TrafficSecrets } from "../types.js";
 import { TlsDecryptError, TlsHandshakeError } from "../errors.js";
 import { ContentType, decryptRecord, encryptRecord, parseRecordHeader, readContentType, serializeRecordHeader } from "../record/record.js";

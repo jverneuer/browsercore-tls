@@ -20,8 +20,7 @@
  * this file focused on the public surface.
  */
 
-import type { CompressionProvider, EventProvider } from "@browsercore/contracts";
-import type { CryptoProvider, HashId } from "@browsercore/crypto";
+import type { CompressionProvider, CryptoProvider, EventProvider, HashId } from "@browsercore/contracts";
 import type { Transport } from "@browsercore/transport";
 import {
     systemClock,

@@ -9,7 +9,7 @@
  * record layer and the handshake state machine.
  */
 
-import type { CryptoProvider, HashId } from "@browsercore/crypto";
+import type { CryptoProvider, HashId } from "@browsercore/contracts";
 import type { Transport } from "@browsercore/transport";
 import type { TrafficSecrets } from "../types.js";
 import { TlsHandshakeError } from "../errors.js";
