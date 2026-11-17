@@ -10,7 +10,8 @@ import type { Clock, CompressionProvider, CryptoProvider, EventProvider } from "
 
 export type { Clock, CompressionProvider };
 import type { Transport } from "@browsercore/transport";
-import type { TlsError } from "./errors.js";
+import type { Certificate } from "./certificates/certificates.js";
+import type { AlertLevel, TlsError } from "./errors.js";
 
 /** Branded TLS session identifier. */
 export type TlsSessionId = string & { __brand: "TlsSessionId" };
@@ -312,6 +313,29 @@ export interface ApplicationData {
 }
 
 /**
+ * A parsed NewSessionTicket plus the derived resumption PSK.
+ *
+ * Domain type (lives here per the types.ts one-source-of-truth rule) because it
+ * crosses the module boundary: `TlsConnection.getResumptionTicket` returns it
+ * to higher layers offering PSK-based session resumption.
+ * `session/session-cache.ts` re-exports it for import-site compatibility.
+ */
+export interface ResumptionTicket {
+    /** The opaque ticket identity the server issued (to echo in a future ClientHello). */
+    readonly ticket: Uint8Array;
+    /** Obfuscated age addend from the ticket (RFC 8446 §4.6.1). */
+    readonly ticketAgeAdd: number;
+    /** Maximum early-data size in bytes, or 0 if the ticket disallows 0-RTT. */
+    readonly maxEarlyDataSize: number;
+    /** Derived resumption PSK (HKDF-Expand-Label of the resumption_master_secret). */
+    readonly psk: Uint8Array;
+    /** Cipher suite under which the original handshake negotiated the ticket. */
+    readonly cipherSuite: CipherSuite;
+    /** Epoch milliseconds when the ticket was received (for TTL enforcement). */
+    readonly receivedAt: number;
+}
+
+/**
  * The public interface for an established TLS connection.
  *
  * Extends {@link EventProvider} so the connection is observable through the
@@ -328,6 +352,12 @@ export interface TlsConnection extends EventProvider {
     readonly cipherSuite: CipherSuite;
     /** ALPN protocol the server selected, if any. */
     readonly alpnProtocol?: string;
+    /**
+     * The validated peer (server) certificate, once the Certificate message
+     * has been consumed. Undefined during the handshake and on connections
+     * negotiated without certificate validation (e.g. PSK resumption).
+     */
+    readonly peerCertificate?: Certificate;
 
     /**
      * Read the next decrypted application-data record. Resolves with the payload,
@@ -346,6 +376,19 @@ export interface TlsConnection extends EventProvider {
      * connection reaches the `closed` terminal state. Idempotent.
      */
     close(): Promise<void>;
+
+    /**
+     * Send a TLS alert (RFC 8446 §6) to the peer. Best-effort: the record is
+     * encrypted once traffic keys exist, plain during the early handshake.
+     */
+    sendAlert(level: AlertLevel, description: number): Promise<void>;
+
+    /**
+     * Retrieve a cached resumption ticket for the given server name, or
+     * undefined if none is stored. Higher layers use this to offer PSK-based
+     * session resumption on subsequent connections.
+     */
+    getResumptionTicket(serverName: string): ResumptionTicket | undefined;
 
     /** Subscribe to lifecycle events (close / error) for observability. */
     on(event: "close" | "error", listener: (arg: CloseReason | TlsError) => void): this;

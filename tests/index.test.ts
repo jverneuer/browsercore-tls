@@ -122,33 +122,36 @@ describe("barrel re-exports (values)", () => {
 describe("barrel re-exports (types)", () => {
     it("declares the public type surface", () => {
         const types: Record<string, unknown> = {};
-        // Touch each type name so a missing export breaks the build.
-        types.conn = null as unknown as TlsConnection;
-        types.ad = null as unknown as ApplicationData;
-        types.ats = null as unknown as ApplicationTrafficSecrets;
-        types.cs = null as unknown as CipherSuite;
-        types.chc = null as unknown as ClientHelloConfig;
-        types.cr = null as unknown as CloseReason;
-        types.kp = null as unknown as KeyPair;
-        types.ng = null as unknown as NamedGroup;
-        types.pv = null as unknown as ProtocolVersion;
-        types.ss = null as unknown as SignatureScheme;
-        types.opts = null as unknown as TlsOptions;
-        types.sid = null as unknown as TlsSessionId;
-        types.state = null as unknown as TlsState;
-        types.ts = null as unknown as TrafficSecrets;
-        types.ct = null as unknown as TlsContentType;
-        types.rh = null as unknown as RecordHeader;
-        types.tr = null as unknown as TlsRecord;
-        types.ch = null as unknown as ClientHello;
-        types.sh = null as unknown as ServerHello;
-        types.shv = null as unknown as ServerHelloValidation;
-        types.ext = null as unknown as TlsExtension;
-        types.cert = null as unknown as Certificate;
-        types.chain = null as unknown as CertificateChain;
-        types.ta = null as unknown as TrustAnchor;
-        types.hp = null as unknown as HandshakePhase;
-        types.al = null as unknown as AlertLevel;
+        // Touch each type name so a missing export breaks the build. Bracket
+        // access is required: `types` is an index-signature record, and
+        // noPropertyAccessFromIndexSignature (family strict flag) rejects
+        // dot access on it.
+        types["conn"] = null as unknown as TlsConnection;
+        types["ad"] = null as unknown as ApplicationData;
+        types["ats"] = null as unknown as ApplicationTrafficSecrets;
+        types["cs"] = null as unknown as CipherSuite;
+        types["chc"] = null as unknown as ClientHelloConfig;
+        types["cr"] = null as unknown as CloseReason;
+        types["kp"] = null as unknown as KeyPair;
+        types["ng"] = null as unknown as NamedGroup;
+        types["pv"] = null as unknown as ProtocolVersion;
+        types["ss"] = null as unknown as SignatureScheme;
+        types["opts"] = null as unknown as TlsOptions;
+        types["sid"] = null as unknown as TlsSessionId;
+        types["state"] = null as unknown as TlsState;
+        types["ts"] = null as unknown as TrafficSecrets;
+        types["ct"] = null as unknown as TlsContentType;
+        types["rh"] = null as unknown as RecordHeader;
+        types["tr"] = null as unknown as TlsRecord;
+        types["ch"] = null as unknown as ClientHello;
+        types["sh"] = null as unknown as ServerHello;
+        types["shv"] = null as unknown as ServerHelloValidation;
+        types["ext"] = null as unknown as TlsExtension;
+        types["cert"] = null as unknown as Certificate;
+        types["chain"] = null as unknown as CertificateChain;
+        types["ta"] = null as unknown as TrustAnchor;
+        types["hp"] = null as unknown as HandshakePhase;
+        types["al"] = null as unknown as AlertLevel;
         expect(Object.keys(types).length).toBeGreaterThan(0);
     });
 });

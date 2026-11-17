@@ -14,10 +14,7 @@ const crypto = createTestCryptoProvider();
 import {
     generateKeyPairSync,
     createSign,
-    createHash,
-    type KeyObject,
 } from "node:crypto";
-import { X509Certificate } from "node:crypto";
 
 import {
     parseCertificate,
@@ -263,7 +260,8 @@ describe("validateHostname", () => {
             tbsBytes: new Uint8Array(0),
             subjectPublicKeyInfo: new Uint8Array(0),
             subjectAltNames: sans,
-            commonName: sans.length === 0 ? commonName : undefined,
+            // Key omitted (not `undefined`) when SANs take over — exactOptionalPropertyTypes.
+            ...(sans.length === 0 ? { commonName } : {}),
             notBefore: 0,
             notAfter: Number.MAX_SAFE_INTEGER,
             keyUsageDigitalSignature: true,

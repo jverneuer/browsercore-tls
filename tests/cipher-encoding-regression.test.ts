@@ -22,8 +22,12 @@ import type { CipherSuite } from "../src/types.js";
 
 /**
  * The authoritative IANA mapping for every CipherSuite the shipped browser
- * profiles offer. Mirrors the switch in cipherSuiteToWire() — kept here as the
- * source of truth the regression asserts against.
+ * profiles offer. Mirrors CIPHER_SUITE_CODES in src/iana/cipher-suites.ts —
+ * kept here as the source of truth the regression asserts against. The
+ * `Record<CipherSuite, number>` key type makes this map exhaustive: adding a
+ * suite to the union without a wire entry here is a compile error, which is
+ * how the 2026-11 fixture drift (9 CBC-SHA256/3DES suites missing) surfaced
+ * once tests were actually typechecked.
  */
 const EXPECTED_WIRE: Readonly<Record<CipherSuite, number>> = {
     // GREASE sentinel (RFC 8701).
@@ -45,11 +49,21 @@ const EXPECTED_WIRE: Readonly<Record<CipherSuite, number>> = {
     "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA": 0xc014,
     "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA": 0xc009,
     "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA": 0xc00a,
+    "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256": 0xc023,
+    "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384": 0xc024,
+    "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256": 0xc027,
+    "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384": 0xc028,
     // TLS 1.2 RSA suites.
     "TLS_RSA_WITH_AES_128_GCM_SHA256": 0x009c,
     "TLS_RSA_WITH_AES_256_GCM_SHA384": 0x009d,
     "TLS_RSA_WITH_AES_128_CBC_SHA": 0x002f,
     "TLS_RSA_WITH_AES_256_CBC_SHA": 0x0035,
+    "TLS_RSA_WITH_AES_128_CBC_SHA256": 0x003c,
+    "TLS_RSA_WITH_AES_256_CBC_SHA256": 0x003d,
+    // Legacy 3DES suites (middlebox-compat profiles).
+    "TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA": 0xc008,
+    "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA": 0xc012,
+    "TLS_RSA_WITH_3DES_EDE_CBC_SHA": 0x000a,
 };
 
 /** Every member of the CipherSuite union, in declaration order. */

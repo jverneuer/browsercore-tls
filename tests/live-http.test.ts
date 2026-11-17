@@ -25,7 +25,7 @@ import { connectTls } from "../src/tls.js";
 import { TLS_1_3 } from "../src/types.js";
 import type { ClientHelloConfig, TlsConnection } from "../src/types.js";
 
-const RUN_LIVE_TESTS = process.env.RUN_LIVE_TESTS === "1";
+const RUN_LIVE_TESTS = process.env["RUN_LIVE_TESTS"] === "1";
 
 const crypto = createTestCryptoProvider();
 const decoder = new TextDecoder();

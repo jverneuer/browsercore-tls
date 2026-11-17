@@ -143,7 +143,6 @@ export class TlsServerSim {
     private leafPrivateKeyPem: string;
     public responses: Uint8Array[] = [];
     private clientKeySharePub: Uint8Array | undefined;
-    private clientHelloMsg: Uint8Array | undefined;
     private readonly opts: ServerOptions;
     private readonly x25519Backend: X25519Backend | undefined;
     /** True after the sim sent an HRR; the next ClientHello gets the real flight. */
@@ -379,7 +378,7 @@ export class TlsServerSim {
         // The corruption is in the plaintext (before AEAD encryption), so
         // decryption still succeeds and the signature check is actually hit.
         if (this.opts.tamperCertificateVerify) {
-            signature[signature.length - 1] ^= 0xff;
+            signature[signature.length - 1]! ^= 0xff;
         }
 
         // signature_scheme(2) = ecdsa_secp256r1_sha256 (0x0403) + sig_len(2) + sig.
@@ -450,7 +449,6 @@ export class TlsServerSim {
      */
     onClientHello(clientHelloRecord: Uint8Array): void {
         const clientHelloMsg = clientHelloRecord.subarray(5); // strip record header
-        this.clientHelloMsg = clientHelloMsg;
         this.clientKeySharePub = this.extractClientKeyShare(clientHelloMsg);
 
         // HRR flow: first ClientHello → send HRR, wait for ClientHello_2.

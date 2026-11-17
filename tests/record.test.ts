@@ -104,7 +104,7 @@ describe("encryptRecord / decryptRecord round-trip", () => {
         const aad = serializeRecordHeader(23, plaintext.length + 16);
         const ciphertext = encryptRecord(plaintext, key, nonce, aad, "AES-128-GCM", crypto);
         // Corrupt the last byte (part of the authentication tag).
-        ciphertext[ciphertext.length - 1] ^= 0xff;
+        ciphertext[ciphertext.length - 1]! ^= 0xff;
         expect(() => decryptRecord(ciphertext, key, nonce, aad, "AES-128-GCM", crypto)).toThrow(TlsDecryptError);
     });
 

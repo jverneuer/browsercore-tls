@@ -24,7 +24,7 @@ import type { HandshakePhase, ServerHello, ServerHelloValidation } from "../src/
 import { TlsHandshakeError } from "../src/errors.js";
 import { ExtensionType } from "../src/extensions/extensions.js";
 import { TLS_1_2, TLS_1_3 } from "../src/types.js";
-import type { CipherSuite, ClientHelloConfig, KeyPair, ProtocolVersion } from "../src/types.js";
+import type { ClientHelloConfig, KeyPair } from "../src/types.js";
 
 describe("isKeyShareGroup", () => {
     it("returns true for every (EC)DHE group the crypto backend supports", () => {
@@ -226,7 +226,7 @@ describe("wireToCipherSuite (invalid value)", () => {
 });
 
 describe("negotiateVersion errors (via parseServerHello)", () => {
-    const offered = {
+    const offered: ServerHelloValidation = {
         cipherSuites: ["TLS_AES_128_GCM_SHA256"],
         supportedVersions: [TLS_1_3],
     };

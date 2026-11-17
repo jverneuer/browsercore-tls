@@ -69,7 +69,7 @@ describe("isHelloRetryRequest", () => {
 
     it("returns false for a random value that differs by one byte", () => {
         const near = new Uint8Array(HELLO_RETRY_REQUEST_RANDOM);
-        near[0] ^= 0x01;
+        near[0]! ^= 0x01;
         expect(isHelloRetryRequest(near)).toBe(false);
     });
 });

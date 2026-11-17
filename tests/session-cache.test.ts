@@ -17,7 +17,6 @@ import {
     parseNewSessionTicket,
     type ResumptionTicket,
 } from "../src/session/session-cache.js";
-import { TLS_1_3 } from "../src/types.js";
 import type { CipherSuite } from "../src/types.js";
 
 const CIPHER_SUITE: CipherSuite = "TLS_AES_128_GCM_SHA256";
@@ -39,7 +38,6 @@ function buildTicketBody(opts: {
     const ageAdd = opts.ticketAgeAdd ?? 0x12345678;
     const nonce = opts.ticketNonce ?? new Uint8Array([0x01]);
     const ticket = opts.ticket ?? new Uint8Array(32).fill(0xab);
-    const hashLen = 32; // SHA-256
 
     // early_data extension (type 42) with a 4-byte max_early_data_size.
     let extensions = new Uint8Array(0);

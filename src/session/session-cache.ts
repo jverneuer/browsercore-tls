@@ -14,26 +14,15 @@
  */
 
 import type { CryptoProvider, HashId } from "@browsercore/contracts";
-import type { CipherSuite } from "../types.js";
+import type { CipherSuite, ResumptionTicket } from "../types.js";
 import { TlsHandshakeError } from "../errors.js";
 import { hkdfExpandLabel, hashLengthFor } from "../crypto/keySchedule.js";
 import { transcriptHash } from "../connection/key-exchange.js";
 
-/** A parsed NewSessionTicket plus the derived resumption PSK. */
-export interface ResumptionTicket {
-    /** The opaque ticket identity the server issued (to echo in a future ClientHello). */
-    readonly ticket: Uint8Array;
-    /** Obfuscated age addend from the ticket (RFC 8446 §4.6.1). */
-    readonly ticketAgeAdd: number;
-    /** Maximum early-data size in bytes, or 0 if the ticket disallows 0-RTT. */
-    readonly maxEarlyDataSize: number;
-    /** Derived resumption PSK (HKDF-Expand-Label of the resumption_master_secret). */
-    readonly psk: Uint8Array;
-    /** Cipher suite under which the original handshake negotiated the ticket. */
-    readonly cipherSuite: CipherSuite;
-    /** Epoch milliseconds when the ticket was received (for TTL enforcement). */
-    readonly receivedAt: number;
-}
+// ResumptionTicket is defined in ../types.ts (domain type — it crosses the
+// module boundary as TlsConnection.getResumptionTicket's return). Re-exported
+// here so existing import sites (tls.ts, the barrel) keep working unchanged.
+export type { ResumptionTicket } from "../types.js";
 
 /**
  * A simple session resumption cache.

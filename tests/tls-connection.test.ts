@@ -13,11 +13,11 @@ import { createMockEventProvider, createTestCryptoProvider } from "./test-helper
 
 const crypto = createTestCryptoProvider();
 import { TlsConnectionImpl } from "../src/tls.js";
-import { ContentType, serializeRecordHeader, encryptRecord } from "../src/record/record.js";
+import { ContentType } from "../src/record/record.js";
 import { TlsError, TlsHandshakeError } from "../src/errors.js";
 import { TLS_1_3 } from "../src/types.js";
 import type { ApplicationTrafficSecrets, TlsState, ClientHelloConfig } from "../src/types.js";
-import { xorNonce, writeEncryptedRecord } from "../src/connection/record-layer.js";
+import { writeEncryptedRecord } from "../src/connection/record-layer.js";
 import { FakeTransport } from "./fake-transport.js";
 
 /** Private fields the handshake driver would set; exposed here via cast. */
