@@ -13,7 +13,7 @@
  * decisions that belong in the caller, not here.
  */
 
-import type { CryptoProvider, HashId } from "@browsercore/crypto";
+import type { CryptoProvider, HashId } from "@browsercore/contracts";
 import type { CipherSuite } from "../types.js";
 import { TlsHandshakeError } from "../errors.js";
 import { hkdfExpandLabel, hashLengthFor } from "../crypto/keySchedule.js";

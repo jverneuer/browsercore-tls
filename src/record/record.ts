@@ -6,7 +6,7 @@
  * payload is delegated to @browsercore/crypto — this module owns framing only.
  */
 
-import type { CryptoProvider } from "@browsercore/crypto";
+import type { CryptoProvider } from "@browsercore/contracts";
 import type { AeadAlgorithm, CipherSuite } from "../types.js";
 import { NotImplementedError, TlsDecryptError } from "../errors.js";
 import { assertNever } from "../utils.js";

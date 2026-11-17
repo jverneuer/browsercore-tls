@@ -9,7 +9,8 @@
  * them together.
  */
 
-import { MLKEM768_CIPHERTEXT_LENGTH, MLKEM768_SECRET_KEY_LENGTH, type CryptoProvider, type HashId } from "@browsercore/crypto";
+import type { CryptoProvider, HashId } from "@browsercore/contracts";
+import { MLKEM768_CIPHERTEXT_LENGTH, MLKEM768_SECRET_KEY_LENGTH } from "@browsercore/crypto";
 import type { KeyPair } from "../types.js";
 import type { ServerHello } from "../handshake/handshake.js";
 import { TlsHandshakeError } from "../errors.js";

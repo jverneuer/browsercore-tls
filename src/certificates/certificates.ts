@@ -14,7 +14,7 @@
  *                     the BEGIN/END text wrapper; downstream code sees raw DER)
  */
 
-import type { CryptoProvider } from "@browsercore/crypto";
+import type { CryptoProvider } from "@browsercore/contracts";
 import type { SignatureScheme } from "../types.js";
 import { TlsHandshakeError, ensureTlsError } from "../errors.js";
 import { constantTimeEqual } from "../utils.js";

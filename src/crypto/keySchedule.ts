@@ -11,7 +11,7 @@
  * the two steps independently (the extract output feeds the next stage's salt).
  */
 
-import type { CryptoProvider, HashId } from "@browsercore/crypto";
+import type { CryptoProvider, HashId } from "@browsercore/contracts";
 
 /**
  * Hash identifiers for the two TLS 1.3 transcript hashes, as {@link HashId}

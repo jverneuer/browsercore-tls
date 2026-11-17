@@ -14,7 +14,7 @@
  */
 
 import type { Transport } from "@browsercore/transport";
-import type { CryptoProvider, HashId } from "@browsercore/crypto";
+import type { CryptoProvider, HashId } from "@browsercore/contracts";
 import { TlsHandshakeError, type AlertLevel, type HandshakePhase as TimeoutPhase } from "../errors.js";
 import { CLIENT_HELLO_RECORD_VERSION, ContentType, cipherSuiteToAead } from "../record/record.js";
 import {

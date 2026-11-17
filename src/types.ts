@@ -6,10 +6,9 @@
  * but NEVER imports node:crypto directly — that boundary is @browsercore/crypto's job.
  */
 
-import type { CompressionProvider, EventProvider } from "@browsercore/contracts";
+import type { CompressionProvider, CryptoProvider, EventProvider } from "@browsercore/contracts";
 
 export type { CompressionProvider };
-import type { CryptoProvider } from "@browsercore/crypto";
 import type { Transport } from "@browsercore/transport";
 import type { TlsError } from "./errors.js";
 
