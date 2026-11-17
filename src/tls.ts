@@ -20,7 +20,7 @@
  * this file focused on the public surface.
  */
 
-import type { CompressionProvider, CryptoProvider, EventProvider, HashId } from "@browsercore/contracts";
+import type { Clock, CompressionProvider, CryptoProvider, EventProvider, HashId } from "@browsercore/contracts";
 import type { Transport } from "@browsercore/transport";
 import {
     systemClock,
@@ -30,7 +30,6 @@ import {
     type CipherSuite,
     type ClientHelloConfig,
     type CloseReason,
-    type Clock,
     type KeyPair,
     type ProtocolVersion,
     type TlsConnection,
@@ -187,7 +186,7 @@ export class TlsConnectionImpl implements TlsConnection, HandshakeContext {
     private readonly profile!: ClientHelloConfig;
     private readonly serverName!: string;
     private readonly trustAnchors: readonly Uint8Array[] = [];
-    /** Time source (defaults to systemClock). Injected via TlsOptions.clock. */
+    /** Time source — the canonical contracts Clock (defaults to systemClock). Injected via TlsOptions.clock. */
     private readonly clock: Clock;
     /** Cryptographic provider, injected via the constructor (never defaulted). */
     public readonly crypto!: CryptoProvider;

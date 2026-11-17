@@ -6,9 +6,9 @@
  * but NEVER imports node:crypto directly — that boundary is @browsercore/crypto's job.
  */
 
-import type { CompressionProvider, CryptoProvider, EventProvider } from "@browsercore/contracts";
+import type { Clock, CompressionProvider, CryptoProvider, EventProvider } from "@browsercore/contracts";
 
-export type { CompressionProvider };
+export type { Clock, CompressionProvider };
 import type { Transport } from "@browsercore/transport";
 import type { TlsError } from "./errors.js";
 
@@ -201,24 +201,25 @@ export interface ClientHelloConfig {
 }
 
 /**
- * Time source for the TLS stack.
+ * The default {@link Clock}: THE canonical contracts Clock, implemented over
+ * the plain JS globals (`Date.now`, `performance.now`, `setTimeout`).
  *
- * Injected via {@link TlsOptions.clock} so time-dependent logic (handshake
- * timeouts, certificate `notBefore`/`notAfter` validation, connection-id
- * generation) is deterministic under test. The default ({@link systemClock})
- * delegates to the wall clock — production code never needs to supply one.
+ * The local tls Clock shape (`{ now; sleep }`) was deleted in 0.4.17 — the
+ * five package-local sibling clocks (tls/http1/http2/http3/quic) all migrate
+ * onto contracts' single `Clock` (replaceability audit 2026-11-16, item #6).
+ * tls itself only CALLS `now`/`sleep` today (handshake timeout, certificate
+ * validity, session ids); the remaining members are additive surface so this
+ * same object can serve as the whole stack's `Platform.time` without a second
+ * adapter. The globals carry no `node:*` import, keeping the default
+ * runtime-agnostic.
  */
-export interface Clock {
-    /** Current epoch milliseconds (matches Date.now()). */
-    now(): number;
-    /** Resolve after `ms` milliseconds (matches setTimeout). */
-    sleep(ms: number): Promise<void>;
-}
-
-/** The default {@link Clock}: delegates to the wall clock. */
 export const systemClock: Clock = {
     now: () => Date.now(),
+    // Monotonic — for elapsed/deadline math; never compare against now().
+    monotonic: () => performance.now(),
     sleep: (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
+    setTimeout: (ms, fn) => setTimeout(fn, ms),
+    clearTimeout: (handle) => { clearTimeout(handle as Parameters<typeof clearTimeout>[0]); },
 };
 
 /** Public options for {@link connectTls}. */
@@ -236,9 +237,9 @@ export interface TlsOptions {
     /** Trust anchors (PEM or DER) for certificate verification. Defaults to system roots. */
     readonly trustAnchors?: readonly Uint8Array[];
     /**
-     * Time source. Defaults to {@link systemClock}. Inject a deterministic
-     * implementation in tests so timeouts and cert-validity checks are
-     * reproducible.
+     * Time source — the canonical `Clock` from `@browsercore/contracts`.
+     * Defaults to {@link systemClock}. Inject a deterministic implementation
+     * in tests so timeouts and cert-validity checks are reproducible.
      */
     readonly clock?: Clock;
     /**

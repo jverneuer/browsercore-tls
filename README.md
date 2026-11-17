@@ -71,6 +71,8 @@ await tls.close();
 | `TlsHandshakeError` | class | Handshake failure at a specific phase |
 | `TlsDecryptError` | class | Record decryption / auth failure |
 | `TlsAlertError` | class | TLS alert with level + description |
+| `Clock` | interface (re-export) | Canonical time source from `@browsercore/contracts` — injected via `TlsOptions.clock` |
+| `systemClock` | const | Default `Clock` over the plain JS globals (`Date.now`, `performance.now`, `setTimeout`) |
 
 ## Dependency graph
 
@@ -82,8 +84,12 @@ await tls.close();
 ```
 
 `@browsercore/contracts` provides the `EventProvider` interface the connection
-composes (dependency injection — no `node:events` import). Shared build, lint,
-and test config comes from `@browsercore/dev` (see [Development](#development)).
+composes (dependency injection — no `node:events` import), the canonical
+`Clock` (see [Time](#time--the-canonical-clock)), and the `TlsHandshakeEngine`
+contract tls satisfies (see
+[TlsHandshakeEngine conformance](#tlshandshakeengine-conformance-contracts-026)).
+Shared build, lint, and test config comes from `@browsercore/dev` (see
+[Development](#development)).
 
 ## Architecture
 
@@ -114,6 +120,46 @@ connection.
 Errors all carry a `kind` discriminator so callers can narrow and inspect
 without leaking backend specifics (`TlsHandshakeError(phase)`,
 `TlsDecryptError`, `TlsAlertError(level, description)`).
+
+## Time — the canonical Clock
+
+Since 0.4.17 this package has **no local Clock type**. `TlsOptions.clock`
+accepts the canonical `Clock` from `@browsercore/contracts` (`src/time.ts`,
+0.2.6) — the single time contract the entire stack migrates onto (five
+package-local sibling clocks existed before; tls's `{ now; sleep }` shape was
+one of them and is deleted). The default `systemClock` implements the FULL
+contract (`now` / `monotonic` / `sleep` / `setTimeout` / `clearTimeout`) over
+the plain JS globals, so the same object can serve as the whole stack's
+`Platform.time` without a second adapter.
+
+tls itself only calls `now` and `sleep` today:
+
+- handshake timeout — `withTimeout` races the handshake against `clock.sleep`
+- certificate `notBefore`/`notAfter` validation — `now()` (epoch seconds)
+- NewSessionTicket timestamps and connection-id generation — `now()`
+
+`monotonic()` is available on the same seam for future deadline hardening:
+timeout code can migrate from a single `sleep(ms)` race to monotonic deadline
+math (immune to wall-clock jumps) with no signature change at call sites (noted
+where the timeout is computed, `src/connection/lifecycle.ts`). Unit contract:
+`now()` is wall time (epoch ms, can jump); `monotonic()` is elapsed-time ms
+and never goes backwards — never compare the two.
+
+## TlsHandshakeEngine conformance (contracts 0.2.6)
+
+`@browsercore/tls` is formally **an implementation of the contracts handshake
+engine**: `runHandshake`, `generateKeyShares`, and `cipherSuiteToAead`, wired
+from the public barrel, satisfy `TlsHandshakeEngine`
+(`@browsercore/contracts` `src/tls-engine.ts`, 0.2.6) with zero adaptation —
+the contract's signatures were lifted verbatim from this package.
+
+The proof is type-level and checked in
+`tests/tls-engine-conformance.test.ts`: the real functions are assigned to a
+`TlsHandshakeEngine`-typed object (plus a negative `@ts-expect-error` control),
+compiled under the repo's strict compiler options. This is the foundation for
+the next batch: `@browsercore/quic` stops importing `@browsercore/tls`
+directly and receives the engine via injection, exactly like crypto/transport
+(no-hard-wires invariant).
 
 ## Not implemented
 

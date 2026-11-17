@@ -9,10 +9,12 @@
 export { connectTls, TlsConnectionImpl, generateKeyShares } from "./tls.js";
 export type { TlsConnection } from "./types.js";
 
-// Re-export the canonical CryptoProvider type so consumers can inject a
-// custom provider via TlsOptions without importing @browsercore/contracts
-// directly (crypto re-exports the same type).
-export type { CryptoProvider } from "@browsercore/contracts";
+// Re-export the canonical CryptoProvider and Clock types so consumers can
+// inject a custom provider / clock via TlsOptions without importing
+// @browsercore/contracts directly (crypto re-exports CryptoProvider too; the
+// Clock here is THE canonical time contract tls's options.clock accepts — the
+// package-local Clock shape was deleted in 0.4.17).
+export type { Clock, CryptoProvider } from "@browsercore/contracts";
 
 export {
     TlsError,
@@ -29,7 +31,6 @@ export {
     type CipherSuite,
     type ClientHelloConfig,
     type CloseReason,
-    type Clock,
     type KeyPair,
     type NamedGroup,
     type ProtocolVersion,

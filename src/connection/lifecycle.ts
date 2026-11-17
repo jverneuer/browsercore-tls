@@ -8,7 +8,8 @@
  * this plumbing.
  */
 
-import { systemClock, type Clock, type TlsState } from "../types.js";
+import type { Clock } from "@browsercore/contracts";
+import { systemClock, type TlsState } from "../types.js";
 import { TlsAlertError, TlsHandshakeError, type HandshakePhase } from "../errors.js";
 import { ContentType } from "../record/record.js";
 import { assertNever } from "../utils.js";
@@ -20,6 +21,12 @@ import { assertNever } from "../utils.js";
  * handshake was actually in when it stalled — not a hardcoded guess. The caller
  * (the connection) exposes a mutable `currentPhase` field that the driver
  * updates before each step, and passes `() => this.currentPhase` here.
+ *
+ * The clock is the canonical contracts `Clock` (0.4.17); only its `sleep` is
+ * consumed today. Future deadline hardening: `Clock.monotonic()` exists on the
+ * same seam for elapsed/deadline math, so this can switch from a single
+ * `sleep(ms)` race to a monotonic deadline loop (immune to wall-clock jumps)
+ * without any signature change at the call sites.
  */
 export async function withTimeout(
     ms: number,
