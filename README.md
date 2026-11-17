@@ -1,8 +1,9 @@
 # @browsercore/tls
 
 [![npm version](https://img.shields.io/npm/v/@browsercore/tls)](https://www.npmjs.com/package/@browsercore/tls)
-[![coverage](https://img.shields.io/endpoint?url=https://jverneuer.github.io/browsercore-tls/badge.json)](https://github.com/jverneuer/browsercore-tls/blob/main/COVERAGE.md)
-[![lint](https://img.shields.io/github/actions/workflow/status/jverneuer/browsercore-tls/ci.yml?label=lint)](https://github.com/jverneuer/browsercore-tls/actions/workflows/ci.yml)
+[![coverage](https://img.shields.io/endpoint?url=https://jverneuer.github.io/browsercore-tls/badge.json)](https://jverneuer.github.io/browsercore-tls/COVERAGE.md)
+[![CI](https://img.shields.io/github/actions/workflow/status/jverneuer/browsercore-tls/ci.yml?label=ci)](https://github.com/jverneuer/browsercore-tls/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/@browsercore/tls.svg)](LICENSE)
 
 A TLS 1.3 client implemented entirely in TypeScript, with optional TLS 1.2
 fallback (RFC 5246). TLS 1.2 support is gated behind server negotiation: if the
