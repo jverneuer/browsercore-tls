@@ -24,7 +24,7 @@ validation. Provides an encrypted byte stream over an existing
 - Cookies
 
 It knows about byte streams (`@browsercore/transport`) and cryptographic primitives
-(`@browsercore/crypto`). It **never** imports `node:crypto` directly — that boundary
+(`@browsercore/crypto`). It **never** imports `node:crypto` directly, and that boundary
 is `@browsercore/crypto`'s job, which keeps the crypto backend replaceable.
 
 ## Public API
@@ -36,7 +36,7 @@ import { connectTls, resolveProfile, TlsHandshakeError } from "@browsercore/tls"
 
 const transport = await connect({ host: "example.com", port: 443 });
 
-// `events` is required — an injected EventProvider backend that decouples the
+// `events` is required: an injected EventProvider backend that decouples the
 // connection from node:events. Any runtime adapter satisfying the EventProvider
 // interface works (here a thin wrapper over Node's EventEmitter).
 const events = new EventEmitter();
@@ -72,7 +72,7 @@ await tls.close();
 | `TlsHandshakeError` | class | Handshake failure at a specific phase |
 | `TlsDecryptError` | class | Record decryption / auth failure |
 | `TlsAlertError` | class | TLS alert with level + description |
-| `Clock` | interface (re-export) | Canonical time source from `@browsercore/contracts` — injected via `TlsOptions.clock` |
+| `Clock` | interface (re-export) | Canonical time source from `@browsercore/contracts`, injected via `TlsOptions.clock` |
 | `systemClock` | const | Default `Clock` over the plain JS globals (`Date.now`, `performance.now`, `setTimeout`) |
 
 ## Dependency graph
@@ -85,7 +85,7 @@ await tls.close();
 ```
 
 `@browsercore/contracts` provides the `EventProvider` interface the connection
-composes (dependency injection — no `node:events` import), the canonical
+composes (dependency injection, no `node:events` import), the canonical
 `Clock` (see [Time](#time--the-canonical-clock)), and the `TlsHandshakeEngine`
 contract tls satisfies (see
 [TlsHandshakeEngine conformance](#tlshandshakeengine-conformance-contracts-026)).
@@ -106,7 +106,7 @@ connection.
 | --- | --- |
 | `src/record/record.ts` | Record header parse/serialize, AEAD encrypt/decrypt (delegates to `@browsercore/crypto`) |
 | `src/handshake/client-hello.ts` | ClientHello builder (SNI, supported_versions, key_share, signature_algorithms, ALPN) |
-| `src/handshake/server-hello.ts` | ServerHello parser — validates cipher suite + version |
+| `src/handshake/server-hello.ts` | ServerHello parser, validates cipher suite + version |
 | `src/handshake/state-machine.ts` | Handshake phase state machine with phase-tagged errors |
 | `src/crypto/keySchedule.ts` | TLS 1.3 key schedule (RFC 8446 §7.1): HKDF-Expand-Label, traffic secrets |
 | `src/certificates/` | X.509 DER parse, hostname validation (RFC 6125), chain verification |
@@ -122,11 +122,11 @@ Errors all carry a `kind` discriminator so callers can narrow and inspect
 without leaking backend specifics (`TlsHandshakeError(phase)`,
 `TlsDecryptError`, `TlsAlertError(level, description)`).
 
-## Time — the canonical Clock
+## Time: the canonical Clock
 
 Since 0.4.17 this package has **no local Clock type**. `TlsOptions.clock`
 accepts the canonical `Clock` from `@browsercore/contracts` (`src/time.ts`,
-0.2.6) — the single time contract the entire stack migrates onto (five
+0.2.6), the single time contract the entire stack migrates onto (five
 package-local sibling clocks existed before; tls's `{ now; sleep }` shape was
 one of them and is deleted). The default `systemClock` implements the FULL
 contract (`now` / `monotonic` / `sleep` / `setTimeout` / `clearTimeout`) over
@@ -135,23 +135,23 @@ the plain JS globals, so the same object can serve as the whole stack's
 
 tls itself only calls `now` and `sleep` today:
 
-- handshake timeout — `withTimeout` races the handshake against `clock.sleep`
-- certificate `notBefore`/`notAfter` validation — `now()` (epoch seconds)
-- NewSessionTicket timestamps and connection-id generation — `now()`
+- handshake timeout: `withTimeout` races the handshake against `clock.sleep`
+- certificate `notBefore`/`notAfter` validation via `now()` (epoch seconds)
+- NewSessionTicket timestamps and connection-id generation via `now()`
 
 `monotonic()` is available on the same seam for future deadline hardening:
 timeout code can migrate from a single `sleep(ms)` race to monotonic deadline
 math (immune to wall-clock jumps) with no signature change at call sites (noted
 where the timeout is computed, `src/connection/lifecycle.ts`). Unit contract:
 `now()` is wall time (epoch ms, can jump); `monotonic()` is elapsed-time ms
-and never goes backwards — never compare the two.
+and never goes backwards, so never compare the two.
 
 ## TlsHandshakeEngine conformance (contracts 0.2.6)
 
 `@browsercore/tls` is formally **an implementation of the contracts handshake
 engine**: `runHandshake`, `generateKeyShares`, and `cipherSuiteToAead`, wired
 from the public barrel, satisfy `TlsHandshakeEngine`
-(`@browsercore/contracts` `src/tls-engine.ts`, 0.2.6) with zero adaptation —
+(`@browsercore/contracts` `src/tls-engine.ts`, 0.2.6) with zero adaptation;
 the contract's signatures were lifted verbatim from this package.
 
 The proof is type-level and checked in
@@ -175,10 +175,10 @@ This repo shares tooling with the `@browsercore/*` family via
 [`@browsercore/dev`](https://www.npmjs.com/package/@browsercore/dev). That package
 is the single source of truth for:
 
-- `tsconfig` strict flags — `tsconfig.json` extends `@browsercore/dev/tsconfig.base.json`
-- `vitest` config — `vitest.config.ts` imports `definePackageConfig` from `@browsercore/dev/vitest`
-- `oxlint` config — `oxlint.config.ts` imports the base ruleset from `@browsercore/dev/oxlint`
-- `coverage-md` bin — shipped via `@browsercore/dev`'s `bin/`, used as `npx coverage-md`
+- `tsconfig` strict flags: `tsconfig.json` extends `@browsercore/dev/tsconfig.base.json`
+- `vitest` config: `vitest.config.ts` imports `definePackageConfig` from `@browsercore/dev/vitest`
+- `oxlint` config: `oxlint.config.ts` imports the base ruleset from `@browsercore/dev/oxlint`
+- `coverage-md` bin: shipped via `@browsercore/dev`'s `bin/`, used as `npx coverage-md`
 
 `@browsercore/dev` is declared in `devDependencies` as `"file:../dev"` for local
 development (the monorepo layout). When installing from npm, consumers resolve the
@@ -187,7 +187,7 @@ published version.
 ### Scripts
 
 ```sh
-npm run typecheck   # tsc --noEmit (strict mode — noUncheckedIndexedAccess, exactOptionalPropertyTypes)
+npm run typecheck   # tsc --noEmit (strict mode, noUncheckedIndexedAccess + exactOptionalPropertyTypes)
 npm run lint        # oxlint --type-aware src/ (tests excluded)
 npm test            # vitest run (in-process fixture server, no real network)
 npm run build       # tsc -p tsconfig.build.json → dist/
@@ -213,7 +213,7 @@ Linting is type-aware oxlint via `oxlint.config.ts`. The file extends the shared
 `promise`, and `node` plugins with `correctness`/`suspicious`/`pedantic` as errors).
 The old `.oxlintrc.json` has been removed.
 
-Private fields use the native TypeScript `private` keyword — the legacy
+Private fields use the native TypeScript `private` keyword. The legacy
 `_`-prefixed naming convention has been fully migrated away, so no
 `no-underscore-dangle` allowlist is required.
 
@@ -221,4 +221,4 @@ Requires **Node >= 26**. ESM only (`"type": "module"`).
 
 ## Contributing
 
-Contributions are welcome — bug reports, reproductions, docs and code alike. Start with [CONTRIBUTING.md](CONTRIBUTING.md); the full guide lives in the [browsersmith repo](https://github.com/jverneuer/browsersmith/blob/main/CONTRIBUTING.md). First timer? Check the [`good first issue`](https://github.com/jverneuer/browsercore-tls/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) label. Security issues: [SECURITY.md](SECURITY.md), never a public issue.
+Contributions are welcome: bug reports, reproductions, docs and code alike. Start with [CONTRIBUTING.md](CONTRIBUTING.md); the full guide lives in the [browsersmith repo](https://github.com/jverneuer/browsersmith/blob/main/CONTRIBUTING.md). First timer? Check the [`good first issue`](https://github.com/jverneuer/browsercore-tls/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) label. Security issues: [SECURITY.md](SECURITY.md), never a public issue.
